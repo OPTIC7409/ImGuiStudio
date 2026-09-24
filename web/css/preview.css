@@ -1,0 +1,110 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #0b0c10;
+  overflow: hidden;
+  font: 12px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+#stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
+#canvas {
+  display: block;
+  outline: none;
+  image-rendering: auto;
+}
+
+body.pixelated #canvas,
+body.pixelated #reference-overlay {
+  image-rendering: pixelated;
+}
+
+#reference-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+#guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hl-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid #4da3ff;
+  background: rgba(77, 163, 255, 0.12);
+}
+
+.hl-box.selected {
+  border-color: #ffb547;
+  background: rgba(255, 181, 71, 0.12);
+}
+
+.hl-label {
+  position: absolute;
+  transform: translateY(-100%);
+  background: #1e6fd9;
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 3px 3px 0 0;
+  font: 11px/16px ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+}
+
+.hl-box.selected .hl-label {
+  background: #c7831b;
+}
+
+.hl-label.below {
+  transform: none;
+  border-radius: 0 0 3px 3px;
+}
+
+#status {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: #c9ced8;
+  pointer-events: none;
+}
+
+#status.visible {
+  display: flex;
+}
+
+#status .box {
+  max-width: 80%;
+  max-height: 80%;
+  overflow: auto;
+  background: rgba(20, 22, 28, 0.94);
+  border: 1px solid #3a2a2e;
+  border-left: 3px solid #ff5c6c;
+  border-radius: 6px;
+  padding: 12px 16px;
+  pointer-events: auto;
+  white-space: pre-wrap;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+#status.info .box {
+  border-left-color: #4da3ff;
+  border-color: #283040;
+}
