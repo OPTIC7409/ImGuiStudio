@@ -11,6 +11,7 @@
 //   STUDIO_SCOPE("graphics");          // semantic namespace for items submitted in this C++ scope
 //   STUDIO_ID("graphics.vsync");       // explicit stable id for the last submitted item
 //   STUDIO_WIDGET("toggle");           // declare the type of the last item (use inside custom widgets)
+//   STUDIO_LABEL("Display mode");      // give a label to an item that has none (custom widgets built on ItemAdd())
 //   STUDIO_BIND(v);                    // expose + allow setting the value behind the last item (bool*/int*/float*/double*/ImVec2*/ImVec4*)
 //   STUDIO_BIND_N(v, n);               // float[n] (n = 1..4)
 //   STUDIO_BIND_COLOR(col, n);         // float[3] or float[4] colour
@@ -56,6 +57,7 @@ namespace Studio
     // Annotate the last submitted item
     void        SetItemId(const char* id, const char* file, int line);
     void        SetItemType(const char* type, const char* file, int line);
+    void        SetItemLabel(const char* label, const char* file, int line);
     void        BindValue(bool* v, const char* file, int line);
     void        BindValue(int* v, const char* file, int line);
     void        BindValue(float* v, const char* file, int line);
@@ -85,6 +87,7 @@ namespace Studio
 #define STUDIO_SCOPE(name)             ::Studio::ScopeGuard STUDIO__CAT(studio_scope_, __LINE__)(name)
 #define STUDIO_ID(id)                  ::Studio::SetItemId(id, __FILE__, __LINE__)
 #define STUDIO_WIDGET(type)            ::Studio::SetItemType(type, __FILE__, __LINE__)
+#define STUDIO_LABEL(label)            ::Studio::SetItemLabel(label, __FILE__, __LINE__)
 #define STUDIO_BIND(ptr)               ::Studio::BindValue(ptr, __FILE__, __LINE__)
 #define STUDIO_BIND_N(ptr, n)          ::Studio::BindFloats(ptr, n, false, __FILE__, __LINE__)
 #define STUDIO_BIND_COLOR(ptr, n)      ::Studio::BindFloats(ptr, n, true, __FILE__, __LINE__)
@@ -102,6 +105,7 @@ namespace Studio
 #define STUDIO_SCOPE(name)             ((void)0)
 #define STUDIO_ID(id)                  ((void)0)
 #define STUDIO_WIDGET(type)            ((void)0)
+#define STUDIO_LABEL(label)            ((void)0)
 #define STUDIO_BIND(ptr)               ((void)0)
 #define STUDIO_BIND_N(ptr, n)          ((void)0)
 #define STUDIO_BIND_COLOR(ptr, n)      ((void)0)

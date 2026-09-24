@@ -767,21 +767,30 @@ const char* ImGuiTestEngine_FindItemDebugLabel(ImGuiContext* ctx, ImGuiID id)
 // Public instrumentation API (studio.h)
 // ----------------------------------------------------------------------------
 
+namespace
+{
+    void RebuildScope(State& s)
+    {
+        s.scopeJoined.clear();
+        for (const std::string& sc : s.scopes)
+        {
+            std::string slug = Slug(sc.c_str());
+            if (slug.empty())
+                continue;
+            if (!s.scopeJoined.empty())
+                s.scopeJoined += '.';
+            s.scopeJoined += slug;
+        }
+    }
+}
+
 namespace Studio
 {
     void PushScope(const char* name)
     {
         State& s = S();
         s.scopes.push_back(name ? name : "");
-        s.scopeJoined.clear();
-        for (const std::string& sc : s.scopes)
-        {
-            if (sc.empty())
-                continue;
-            if (!s.scopeJoined.empty())
-                s.scopeJoined += '.';
-            s.scopeJoined += sc;
-        }
+        RebuildScope(s);
     }
 
     void PopScope()
@@ -793,15 +802,7 @@ namespace Studio
             return;
         }
         s.scopes.pop_back();
-        s.scopeJoined.clear();
-        for (const std::string& sc : s.scopes)
-        {
-            if (sc.empty())
-                continue;
-            if (!s.scopeJoined.empty())
-                s.scopeJoined += '.';
-            s.scopeJoined += sc;
-        }
+        RebuildScope(s);
     }
 
     void SetItemId(const char* id, const char* file, int line)
@@ -810,6 +811,16 @@ namespace Studio
         if (!r || !id)
             return;
         r->explicitId = id;
+        AddSource(*r, file, line);
+    }
+
+    void SetItemLabel(const char* label, const char* file, int line)
+    {
+        Record* r = LastItemRecord(nullptr);
+        if (!r || !label)
+            return;
+        r->label = label;
+        r->hasInfo = true;
         AddSource(*r, file, line);
     }
 

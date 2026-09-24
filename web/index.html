@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ImGui Studio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/css/studio.css">
+<link rel="stylesheet" data-name="vs/editor/editor.main" href="/vendor/monaco/vs/editor/editor.main.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand"><span class="logo">◆</span> ImGui Studio</div>
+    <div class="project" id="project-name">…</div>
+    <div class="sep"></div>
+    <button id="btn-build" class="primary" title="Save all and build (Ctrl+B)"><span class="ico">▶</span> Build</button>
+    <div id="build-pill" class="pill idle">No builds yet</div>
+    <label class="toggle" title="Rebuild automatically when source files change on disk"><input type="checkbox" id="auto-build"> Auto-build</label>
+    <div class="spacer"></div>
+    <div id="runtime-status" class="runtime-status" title="Preview runtimes"></div>
+    <label class="toggle" title="Agent commands drive this visible preview instead of the headless one"><input type="checkbox" id="agent-visible"> Agent drives preview</label>
+    <button id="btn-export" title="Export native C++ project (CMake + GLFW + OpenGL3)">Export</button>
+  </header>
+
+  <main id="workspace">
+    <section id="left" class="panel">
+      <div class="panel-header">
+        <span>Files</span>
+        <div class="actions"><button class="icon" id="btn-new-file" title="New file">＋</button><button class="icon" id="btn-refresh-files" title="Refresh">⟳</button></div>
+      </div>
+      <div id="file-tree"></div>
+      <div class="hsplit" data-target="file-tree"></div>
+      <div id="editor-tabs" class="tabs"></div>
+      <div id="editor-banner" hidden></div>
+      <div id="editor"></div>
+    </section>
+
+    <div class="vsplit" data-side="left"></div>
+
+    <section id="center" class="panel">
+      <div class="panel-header center-header">
+        <div class="seg" id="center-tabs">
+          <button data-view="preview" class="active">Live preview</button>
+          <button data-view="compare">Compare</button>
+        </div>
+        <div class="preview-tools" id="preview-tools">
+          <select id="vp-select" title="Viewport"></select>
+          <select id="zoom-select" title="Zoom">
+            <option value="fit">Fit</option><option value="0.5">50%</option><option value="1">100%</option><option value="2">200%</option><option value="3">300%</option>
+          </select>
+          <select id="dpr-select" title="Framebuffer scale (HiDPI)"><option value="1">1×</option><option value="2">2×</option></select>
+          <span class="divider"></span>
+          <button class="icon" id="btn-pause" title="Pause / resume time">❚❚</button>
+          <button class="icon" id="btn-step" title="Step one frame (while paused)">⇥</button>
+          <select id="timescale" title="Time scale (slow motion)"><option value="1">1×</option><option value="0.5">½×</option><option value="0.25">¼×</option><option value="0.1">⅒×</option></select>
+          <span class="divider"></span>
+          <button class="icon toggle-btn" id="btn-inspect" title="Inspect widgets (hover / click in the preview)">⌖</button>
+          <button class="icon toggle-btn" id="btn-grid" title="8px grid">#</button>
+          <button class="icon toggle-btn" id="btn-overlay" title="Overlay the active reference on the live preview">◐</button>
+          <input type="range" id="overlay-opacity" min="0" max="1" step="0.05" value="0.5" title="Overlay opacity">
+          <select id="overlay-blend" title="Overlay mode"><option value="normal">Blend</option><option value="difference">Difference</option></select>
+          <span class="divider"></span>
+          <button class="icon" id="btn-capture" title="Capture the visible preview">⎙</button>
+          <button class="icon" id="btn-reload" title="Reload preview (reset state)">↻</button>
+        </div>
+      </div>
+      <div id="view-preview" class="view active">
+        <iframe id="preview-frame" title="Dear ImGui preview"></iframe>
+        <div id="preview-stats"></div>
+      </div>
+      <div id="view-compare" class="view"></div>
+    </section>
+
+    <div class="vsplit" data-side="right"></div>
+
+    <section id="right" class="panel">
+      <div class="tabs" id="right-tabs">
+        <button data-tab="inspector" class="active">Inspector</button>
+        <button data-tab="reference">Reference</button>
+        <button data-tab="history">History</button>
+        <button data-tab="captures">Captures</button>
+        <button data-tab="activity">Agent <span class="badge" id="activity-badge" hidden>0</span></button>
+      </div>
+      <div class="tab-body" id="tab-inspector"></div>
+      <div class="tab-body" id="tab-reference" hidden></div>
+      <div class="tab-body" id="tab-history" hidden></div>
+      <div class="tab-body" id="tab-captures" hidden></div>
+      <div class="tab-body" id="tab-activity" hidden></div>
+    </section>
+  </main>
+
+  <div class="hsplit bottom-split" data-target="bottom"></div>
+  <footer id="bottom" class="panel">
+    <div class="tabs" id="bottom-tabs">
+      <button data-tab="problems" class="active">Problems <span class="badge" id="problems-badge" hidden>0</span></button>
+      <button data-tab="output">Build output</button>
+      <button data-tab="runtime">Runtime <span class="badge" id="runtime-badge" hidden>0</span></button>
+      <div class="spacer"></div>
+      <button class="icon" id="btn-clear-bottom" title="Clear">⌫</button>
+    </div>
+    <div class="tab-body" id="tab-problems"></div>
+    <div class="tab-body mono" id="tab-output" hidden></div>
+    <div class="tab-body mono" id="tab-runtime" hidden></div>
+  </footer>
+</div>
+<div id="modal-root"></div>
+<div id="toasts"></div>
+<script src="/vendor/monaco/vs/loader.js"></script>
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

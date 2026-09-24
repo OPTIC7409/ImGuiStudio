@@ -130,6 +130,20 @@ export function startHttpServer(studio, { port, host = '127.0.0.1' }) {
             runtime_errors: studio.hub.errors.slice(-100),
           });
         }
+        if (p === '/api/history-file') {
+          let buf = null;
+          try {
+            buf = studio.history.fileAt(Number(url.searchParams.get('build')), String(url.searchParams.get('path') || ''));
+          } catch {
+            buf = null;
+          }
+          if (!buf) {
+            res.writeHead(404, { 'content-type': 'text/plain' });
+            return res.end('');
+          }
+          res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+          return res.end(buf);
+        }
         if (p.startsWith('/api/build-log/')) {
           const id = Number(p.split('/').pop());
           return sendFile(res, path.join(studio.studioDir, 'builds'), `${id}.log`);

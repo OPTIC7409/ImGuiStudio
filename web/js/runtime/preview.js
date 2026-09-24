@@ -364,7 +364,7 @@ function loop(ts) {
     state.fps = Math.round((state.fpsFrames * 1000) / (now - state.fpsT0));
     state.fpsFrames = 0;
     state.fpsT0 = now;
-    postParent({ type: 'event', name: 'stats', data: { fps: state.fps, frame: state.frames, time: round(state.time, 2) } });
+    postParent({ type: 'event', name: 'stats', data: { fps: state.fps, frame: state.frames, time: round(state.time, 2), build: state.buildId, viewport: state.viewport } });
   }
   if (state.inspect && state.hoverPoint) updateInspectHover();
 }

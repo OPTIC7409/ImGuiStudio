@@ -677,7 +677,8 @@ op('capture_animation', {
       return { image: im, label: `T=${Math.round(f.t_ms)}MS` };
     });
     const tileW = tiles[0].image.width;
-    const columns = Math.max(1, Math.min(frames.length, Math.floor(2600 / (tileW + 8))));
+    const maxCols = Math.max(1, Math.min(frames.length, Math.floor(2600 / (tileW + 8))));
+    const columns = Math.ceil(frames.length / Math.ceil(frames.length / maxCols));
     const strip = compose(tiles, { columns, labelScale: 2 });
     const stripPng = encodePng(strip);
     const rec = await studio.saveCapture(stripPng, {
@@ -1046,6 +1047,18 @@ op('studio_settings', {
     for (const k of ['auto_build', 'agent_target', 'headless']) if (args[k] !== undefined) patch[k] = args[k];
     if (Object.keys(patch).length) await studio.saveSettings(patch);
     return studio.settings;
+  },
+});
+
+op('capture_upload', {
+  mcp: false,
+  title: 'Save capture',
+  description: 'Save a PNG captured by the visible Studio preview.',
+  input: S.obj({ png: S.str('base64 PNG'), label: S.str(''), meta: { type: 'object' }, region: { type: 'object' }, kind: S.str('') }, ['png']),
+  async handler({ png, label = 'Studio preview', meta = {}, region = null, kind = 'screen' }, { studio }) {
+    const buf = Buffer.from(png, 'base64');
+    const img = decodeImage(buf);
+    return studio.saveCapture(buf, { kind, label, width: img.width, height: img.height, region, build_id: meta.build_id, meta, source: 'studio' });
   },
 });
 

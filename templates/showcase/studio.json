@@ -1,0 +1,8 @@
+{
+  "name": "Nova Control Center",
+  "sources": ["src/**/*.cpp", "widgets/**/*.cpp", "theme/**/*.cpp", "animation/**/*.cpp"],
+  "include_dirs": [".", "src", "widgets", "theme", "animation"],
+  "assets": ["assets"],
+  "viewport": { "width": 1280, "height": 800 },
+  "background": "#07080c"
+}
