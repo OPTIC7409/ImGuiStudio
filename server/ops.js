@@ -178,7 +178,8 @@ function buildSummaryForAgent(r) {
   const warnings = (r.warnings || []).filter((w) => !w.external);
   if (warnings.length) out.warnings = warnings.slice(0, 10).map(trimDiag);
   if (r.runtime) {
-    out.preview = r.runtime.loaded ? (r.runtime.crashed ? 'crashed' : 'loaded') : `not loaded: ${r.runtime.reason || 'unknown'}`;
+    out.preview = r.runtime.crashed ? 'crashed' : r.runtime.loaded ? 'loaded' : `not loaded: ${r.runtime.reason || 'unknown'}`;
+    if (r.runtime.crashed) out.next = 'The build compiled but the app crashed while starting. Read runtime_errors (assertion file:line, stack), fix it and rebuild.';
     if (r.runtime.errors && r.runtime.errors.length) out.runtime_errors = r.runtime.errors.slice(0, 10);
   }
   if (r.screenshot) {
@@ -1062,6 +1063,16 @@ op('capture_upload', {
   },
 });
 
+op('agent_say', {
+  mcp: false,
+  title: 'Agent narration',
+  description: 'Record a message from the design agent in the activity log.',
+  input: S.obj({ text: S.str('Message') }, ['text']),
+  async handler({ text }) {
+    return { text: String(text) };
+  },
+});
+
 op('activity_log', {
   mcp: false,
   title: 'Activity log',
@@ -1088,6 +1099,7 @@ function summarizeArgs(args) {
 
 function summarizeResult(name, r) {
   if (!r || typeof r !== 'object') return null;
+  if (name === 'agent_say') return String(r.text || '').slice(0, 600);
   if (name === 'build_start') return r.success ? `build #${r.build_id} ok (${r.duration_ms} ms)` : `build #${r.build_id} failed: ${r.errors?.length || 0} error(s)`;
   if (r.similarity != null) return `similarity ${r.similarity}`;
   if (r.capture_id) return `capture ${r.capture_id}`;
@@ -1101,7 +1113,7 @@ export async function runOp(studio, name, args = {}, { source = 'api' } = {}) {
   const def = OPS.get(name);
   if (!def) throw new StudioError('unknown_op', `Unknown operation: ${name}`);
   const started = Date.now();
-  const entry = { id: `${started}-${Math.random().toString(36).slice(2, 7)}`, time: new Date(started).toISOString(), source, op: name, args: summarizeArgs(args) };
+  const entry = { id: `${started}-${Math.random().toString(36).slice(2, 7)}`, time: new Date(started).toISOString(), source, op: name, args: name === 'agent_say' ? {} : summarizeArgs(args) };
   try {
     const result = await def.handler(args || {}, { studio, source });
     entry.ok = true;

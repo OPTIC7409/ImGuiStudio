@@ -96,7 +96,7 @@ export class RuntimeHub extends Emitter {
 
   // Pick the runtime agent commands should go to.
   pick({ role = null, target = 'auto' } = {}) {
-    const all = [...this.runtimes.values()].filter((r) => r.ws.readyState === 1);
+    const all = [...this.runtimes.values()].filter((r) => r.ws.readyState === 1 && !r.stale);
     const byRole = (r) => all.filter((x) => x.role === r).sort((a, b) => b.connectedAt - a.connectedAt);
     let order;
     if (role) order = byRole(role);
@@ -133,9 +133,18 @@ export class RuntimeHub extends Emitter {
     });
   }
 
+  // Mark every runtime of a role as stale (e.g. right before its page navigates away).
+  invalidate(role) {
+    for (const rt of this.runtimes.values()) {
+      if (rt.role !== role) continue;
+      rt.ready = false;
+      rt.stale = true;
+    }
+  }
+
   // Resolve when a runtime with the given role reports ready for the given build (or crashes).
   waitForReady({ role, build, timeout = 30000 }) {
-    const existing = [...this.runtimes.values()].find((r) => r.role === role && r.build === build && (r.ready || r.crashed));
+    const existing = [...this.runtimes.values()].find((r) => r.role === role && r.build === build && !r.stale && (r.ready || r.crashed));
     if (existing) return Promise.resolve({ runtime: existing, crashed: existing.crashed });
     return new Promise((resolve) => {
       const offReady = this.on('runtime_ready', ({ runtime }) => {

@@ -86,7 +86,7 @@ export function initLayout(app) {
   app.bus.on('center-view', (view) => {
     for (const b of center.querySelectorAll('button')) b.classList.toggle('active', b.dataset.view === view);
     for (const v of document.querySelectorAll('#center .view')) v.classList.toggle('active', v.id === `view-${view}`);
-    document.getElementById('preview-tools').style.visibility = view === 'preview' ? 'visible' : 'hidden';
+    document.getElementById('preview-tools').style.display = view === 'preview' ? '' : 'none';
     app.centerView = view;
   });
   app.centerView = 'preview';

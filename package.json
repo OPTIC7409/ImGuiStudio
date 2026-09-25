@@ -11,7 +11,7 @@
     "start": "node bin/imgui-studio.js serve",
     "mcp": "node bin/imgui-studio.js mcp",
     "build": "node bin/imgui-studio.js build",
-    "test": "node --test test/"
+    "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "engines": {
     "node": ">=20.10"

@@ -295,8 +295,10 @@ namespace
         std::string src = Source(file, line);
         if (src.empty())
             return;
+        // One location per file is enough to navigate to the widget's code.
+        const size_t flen = strlen(file);
         for (const std::string& s : r.sources)
-            if (s == src)
+            if (s.compare(0, flen, file) == 0 && s.size() > flen && s[flen] == ':')
                 return;
         if (r.sources.size() < 4)
             r.sources.push_back(src);

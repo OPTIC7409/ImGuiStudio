@@ -3,19 +3,25 @@
 //
 //   imgui-studio serve  [--project DIR] [--port N] [--no-headless]   Studio UI + API (+ headless agent preview)
 //   imgui-studio mcp    [--project DIR] [--port N]                   MCP server on stdio (starts or reuses the Studio server)
-//   imgui-studio new    <dir> [--template showcase|minimal] [--name NAME]
+//   imgui-studio agent  "<brief>" [--project DIR | --new DIR] [--reference IMG] [--model ID] [--effort LEVEL]
+//                       [--budget USD] [--max-turns N] [--dry-run]    run the ImGui Menu Designer (Claude Code, headless)
+//   imgui-studio agent-kit [--project DIR]                           install the Claude Code kit (skill, subagent, .mcp.json)
+//   imgui-studio new    <dir> [--template showcase|minimal] [--name NAME] [--no-agent-kit]
 //   imgui-studio build  [--project DIR]                              one-shot build, prints the JSON result
 //   imgui-studio export [--project DIR] [--dest DIR]
-//   imgui-studio doctor                                              check toolchain and browser
+//   imgui-studio doctor                                              check toolchain, browser and Claude Code
 import fs from 'node:fs';
-import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { DEFAULT_PORT, STUDIO_ROOT, TEMPLATES_DIR, findToolchain } from '../server/config.js';
+import { STUDIO_ROOT, findToolchain } from '../server/config.js';
 import { Studio } from '../server/studio.js';
-import { startHttpServer } from '../server/http.js';
+import { startStudio } from '../server/launch.js';
 import { localCaller, remoteCaller, runMcpServer } from '../server/mcp.js';
 import { runOp } from '../server/ops.js';
+import { createProject, installAgentKit, listTemplates, subagentDefinition, AGENT_NAME } from '../server/scaffold.js';
+import { findClaude, runDesignAgent } from '../server/agent.js';
 import { log } from '../server/util.js';
+
+const BOOLEAN_FLAGS = new Set(['dry-run', 'no-headless', 'no-agent-kit', 'build', 'repo', 'check']);
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -24,24 +30,11 @@ function parseArgs(argv) {
     if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=');
       if (v !== undefined) out[k] = v;
-      else if (argv[i + 1] && !argv[i + 1].startsWith('--')) out[k] = argv[++i];
+      else if (!BOOLEAN_FLAGS.has(k) && argv[i + 1] && !argv[i + 1].startsWith('--')) out[k] = argv[++i];
       else out[k] = true;
     } else out._.push(a);
   }
   return out;
-}
-
-async function copyTemplate(template, dest, name) {
-  const src = path.join(TEMPLATES_DIR, template);
-  if (!fs.existsSync(src)) throw new Error(`Unknown template "${template}" (available: ${fs.readdirSync(TEMPLATES_DIR).join(', ')})`);
-  if (fs.existsSync(dest) && fs.readdirSync(dest).length) throw new Error(`${dest} already exists and is not empty`);
-  await fsp.cp(src, dest, { recursive: true });
-  if (name) {
-    const f = path.join(dest, 'studio.json');
-    const cfg = JSON.parse(await fsp.readFile(f, 'utf8'));
-    cfg.name = name;
-    await fsp.writeFile(f, `${JSON.stringify(cfg, null, 2)}\n`);
-  }
 }
 
 async function resolveProject(args) {
@@ -51,39 +44,9 @@ async function resolveProject(args) {
   const ws = path.join(STUDIO_ROOT, 'workspace');
   if (!fs.existsSync(path.join(ws, 'studio.json'))) {
     log(`creating default project in ${ws} from the "showcase" template`);
-    await copyTemplate('showcase', ws, null);
+    await createProject(ws, { template: 'showcase' });
   }
   return ws;
-}
-
-async function probe(port) {
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1500) });
-    const body = await res.json();
-    return body && body.app === 'imgui-studio' ? body : { foreign: true };
-  } catch {
-    return null;
-  }
-}
-
-async function startStudio(projectDir, args) {
-  let port = Number(args.port || DEFAULT_PORT);
-  for (let attempt = 0; attempt < 20; attempt++, port++) {
-    const existing = await probe(port);
-    if (existing && !existing.foreign && path.resolve(existing.project) === projectDir) return { reuse: `http://127.0.0.1:${port}` };
-    if (existing) continue;
-    const studio = new Studio({ projectDir, port });
-    await studio.init();
-    if (args['no-headless']) studio.settings.headless = false;
-    try {
-      const srv = await startHttpServer(studio, { port, host: args.host || '127.0.0.1' });
-      return { studio, srv, port };
-    } catch (e) {
-      if (e.code === 'EADDRINUSE') continue;
-      throw e;
-    }
-  }
-  throw new Error('No free port found');
 }
 
 async function main() {
@@ -92,9 +55,31 @@ async function main() {
 
   if (cmd === 'new') {
     const dest = args._[1];
-    if (!dest) throw new Error('usage: imgui-studio new <dir> [--template showcase|minimal] [--name NAME]');
-    await copyTemplate(String(args.template || 'showcase'), path.resolve(dest), args.name ? String(args.name) : null);
-    process.stderr.write(`Created ${path.resolve(dest)}\nNext: imgui-studio serve --project ${dest}\n`);
+    if (!dest) throw new Error(`usage: imgui-studio new <dir> [--template ${listTemplates().join('|')}] [--name NAME] [--no-agent-kit]`);
+    await createProject(path.resolve(dest), { template: String(args.template || 'showcase'), name: args.name ? String(args.name) : null, agentKit: !args['no-agent-kit'] });
+    process.stderr.write(`Created ${path.resolve(dest)}\nNext: imgui-studio serve --project ${dest}\n   or: imgui-studio agent "Design a settings menu for ..." --project ${dest}\n`);
+    return;
+  }
+
+  if (cmd === 'agent-kit') {
+    if (args.repo) {
+      // Regenerate the repository's own subagent definition from agent/designer.md.
+      const file = path.join(STUDIO_ROOT, '.claude', 'agents', `${AGENT_NAME}.md`);
+      const want = subagentDefinition();
+      if (args.check) {
+        const have = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+        if (have !== want) throw new Error(`${file} is out of date; run: imgui-studio agent-kit --repo`);
+        process.stderr.write('agent kit is up to date\n');
+        return;
+      }
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, want);
+      process.stderr.write(`wrote ${file}\n`);
+      return;
+    }
+    const projectDir = await resolveProject(args);
+    const r = await installAgentKit(projectDir);
+    process.stderr.write(`Installed the Claude Code kit in ${r.project}:\n${r.written.map((w) => `  ${w}`).join('\n')}\n` + 'Run `claude` there: CLAUDE.md imports the design skill in full, and the imgui-studio MCP server is configured.\n');
     return;
   }
 
@@ -107,8 +92,52 @@ async function main() {
     } catch {
       report.playwright_core = 'missing (npm install playwright-core) - headless agent preview disabled';
     }
+    report.claude_code = findClaude() || 'not found (needed for `imgui-studio agent`)';
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     return;
+  }
+
+  if (cmd === 'agent') {
+    const brief = args._.slice(1).join(' ').trim() || (args.brief ? String(args.brief) : '');
+    if (!brief) throw new Error('usage: imgui-studio agent "<what to design>" [--project DIR | --new DIR] [--reference image.png] [--dry-run]');
+    let projectDir;
+    if (args.new) {
+      projectDir = path.resolve(String(args.new));
+      await createProject(projectDir, { template: String(args.template || 'minimal'), name: args.name ? String(args.name) : null });
+      log(`created ${projectDir} from the "${args.template || 'minimal'}" template`);
+    } else {
+      projectDir = await resolveProject(args);
+    }
+    const r = await startStudio(projectDir, { port: args.port, headless: !args['no-headless'] });
+    const studioUrl = r.reuse || `http://localhost:${r.port}`;
+    let outcome;
+    try {
+      outcome = await runDesignAgent({
+        projectDir,
+        brief,
+        reference: args.reference ? String(args.reference) : null,
+        port: r.port,
+        studioUrl,
+        model: args.model ? String(args.model) : undefined,
+        effort: args.effort ? String(args.effort) : 'high',
+        maxTurns: args['max-turns'] ? Number(args['max-turns']) : null,
+        budgetUsd: args.budget ? Number(args.budget) : null,
+        dryRun: !!args['dry-run'],
+        studio: r.studio || null,
+      });
+    } finally {
+      if (r.studio && !args.keep) {
+        await r.studio.shutdown();
+        r.srv.server.close();
+      }
+    }
+    if (outcome.dryRun) {
+      process.stdout.write(`${JSON.stringify({ ...outcome, command: `${outcome.claude} ${outcome.args.map((a) => (/[\s*]/.test(a) ? JSON.stringify(a) : a)).join(' ')} < task` }, null, 2)}\n`);
+    } else {
+      process.stderr.write(`\ntranscript: ${outcome.transcript}\n`);
+      process.exitCode = outcome.success ? 0 : 1;
+    }
+    process.exit(process.exitCode || 0);
   }
 
   const projectDir = await resolveProject(args);
@@ -132,7 +161,7 @@ async function main() {
   }
 
   if (cmd === 'serve') {
-    const r = await startStudio(projectDir, args);
+    const r = await startStudio(projectDir, { port: args.port, host: args.host || '127.0.0.1', headless: !args['no-headless'] });
     if (r.reuse) {
       process.stderr.write(`ImGui Studio is already running for this project: ${r.reuse}\n`);
       return;
@@ -154,7 +183,7 @@ async function main() {
   }
 
   if (cmd === 'mcp') {
-    const r = await startStudio(projectDir, args);
+    const r = await startStudio(projectDir, { port: args.port, headless: !args['no-headless'] });
     let call;
     let studio = null;
     if (r.reuse) {
@@ -170,7 +199,7 @@ async function main() {
     process.exit(0);
   }
 
-  throw new Error(`Unknown command "${cmd}". Commands: serve, mcp, new, build, export, check, doctor`);
+  throw new Error(`Unknown command "${cmd}". Commands: serve, mcp, agent, agent-kit, new, build, export, check, doctor`);
 }
 
 main().catch((e) => {

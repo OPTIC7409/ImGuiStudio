@@ -114,6 +114,7 @@ export class HeadlessRunner {
       await this.page.setViewportSize({ width: vp.width, height: vp.height });
       this.viewport = vp;
     }
+    this.hub.invalidate('agent');
     const wait = this.hub.waitForReady({ role: 'agent', build, timeout });
     this.build = build;
     const url = `${this.baseUrl}/preview.html?role=agent&build=${build}&zoom=1`;

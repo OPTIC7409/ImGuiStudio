@@ -146,7 +146,7 @@ export async function exportProject(studio, { dest = null, zip = true, includeIm
   // Project files (sources, headers, assets); Studio state and exports are skipped by walkFiles.
   const projectImgui = cfg.imgui && cfg.imgui !== 'builtin' ? toPosix(path.relative(projectDir, imguiDirFor(projectDir, cfg))) : null;
   for (const rel of walkFiles(projectDir)) {
-    if (rel === 'studio.json') continue;
+    if (rel === 'studio.json' || rel === 'CLAUDE.md' || rel === '.mcp.json') continue;
     if (projectImgui && (rel === projectImgui || rel.startsWith(`${projectImgui}/`))) continue;
     await add(rel, await fsp.readFile(path.join(projectDir, rel)));
   }

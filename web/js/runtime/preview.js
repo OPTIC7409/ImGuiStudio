@@ -250,6 +250,7 @@ async function boot() {
       studioOnReady: () => state._resolveReady(),
       studioOnLog: (level, text) => {
         const clean = String(text).replace(/^\[\d+\]\s*/, '').trim();
+        if (/^\[imgui-error\] \(current settings:/.test(clean)) return;
         if (level >= 2) reportError('imgui', clean.replace(/^\[imgui-error\]\s*/, ''));
         else reportLog(level === 1 ? 'warning' : 'imgui', clean);
       },

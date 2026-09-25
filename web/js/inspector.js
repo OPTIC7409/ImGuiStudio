@@ -57,6 +57,14 @@ export function initInspector(app) {
   setInterval(poll, 400);
   app.bus.on('preview-ready', () => poll(true));
 
+  // "Nova/##page_398DAF6D/##card_516A7F4E" -> "Nova › page › card"
+  function prettyWindow(name) {
+    return name
+      .split('/')
+      .map((seg) => seg.replace(/^#+/, '').replace(/_[0-9A-F]{8}$/, '') || '·')
+      .join(' › ');
+  }
+
   function matches(w, q) {
     if (!q) return true;
     return w.id.toLowerCase().includes(q) || (w.label || '').toLowerCase().includes(q) || (w.type || '').toLowerCase().includes(q);
@@ -103,7 +111,7 @@ export function initInspector(app) {
     document.getElementById('insp-count').textContent = `${count} widgets · frame ${snapshot.frame}`;
     for (const [win, ws] of byWindow) {
       const winInfo = snapshot.windows.find((x) => x.name === win);
-      listEl.appendChild(h('div', { class: 'insp-window' }, h('span', {}, win), h('span', { class: 'faint' }, winInfo ? `${winInfo.kind} ${Math.round(winInfo.bounds.width)}×${Math.round(winInfo.bounds.height)}` : '')));
+      listEl.appendChild(h('div', { class: 'insp-window', title: win }, h('span', { class: 'wname' }, prettyWindow(win)), h('span', { class: 'faint' }, winInfo ? `${winInfo.kind} ${Math.round(winInfo.bounds.width)}×${Math.round(winInfo.bounds.height)}` : '')));
       for (const w of ws) {
         listEl.appendChild(
           h(
