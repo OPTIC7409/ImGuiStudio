@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { log } from './util.js';
 
-function findBrowser() {
+export function findBrowser() {
   const env = process.env.IMGUI_STUDIO_BROWSER;
   if (env && fs.existsSync(env)) return env;
   const roots = [process.env.PLAYWRIGHT_BROWSERS_PATH, path.join(os.homedir(), '.cache', 'ms-playwright'), path.join(os.homedir(), 'Library', 'Caches', 'ms-playwright'), path.join(os.homedir(), 'AppData', 'Local', 'ms-playwright')].filter(Boolean);
@@ -18,6 +18,8 @@ function findBrowser() {
     ['chrome-linux', 'chrome'],
     ['chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'],
     ['chrome-mac-arm64', 'Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing'],
+    ['chrome-mac-x64', 'Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing'],
+    ['chrome-mac', 'Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing'],
     ['chrome-win', 'chrome.exe'],
     ['chrome-win64', 'chrome.exe'],
   ];
@@ -31,15 +33,24 @@ function findBrowser() {
       }
     }
   }
+  // Any Chromium-based browser works (the preview renders with SwiftShader either way).
+  const local = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
   const system = [
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
     '/usr/bin/google-chrome',
     '/usr/bin/google-chrome-stable',
+    '/snap/bin/chromium',
+    '/usr/bin/microsoft-edge',
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    path.join(os.homedir(), 'Applications', 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome'),
     '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    path.join(local, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
   ];
   return system.find((p) => fs.existsSync(p)) || null;
 }

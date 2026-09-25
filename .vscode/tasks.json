@@ -1,0 +1,58 @@
+{
+  // ImGui Studio tasks for Cursor / VS Code (Terminal > Run Task, or Ctrl+Shift+B for "run everything").
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ImGui Studio: run everything",
+      "detail": "Showcase Studio on :7420 and the agent-built Resonance menu on :7421, opened in your browser",
+      "dependsOn": ["ImGui Studio: showcase", "ImGui Studio: Resonance example"],
+      "dependsOrder": "parallel",
+      "group": { "kind": "build", "isDefault": true },
+      "runOptions": { "runOn": "folderOpen" },
+      "problemMatcher": []
+    },
+    {
+      "label": "ImGui Studio: showcase",
+      "type": "shell",
+      "command": "node bin/imgui-studio.js serve --port 7420 --open",
+      "isBackground": true,
+      "presentation": { "group": "studio", "panel": "dedicated" },
+      "problemMatcher": { "owner": "imgui-studio", "pattern": { "regexp": "^\\0$" }, "background": { "activelyMatching": true, "beginsPattern": "ImGui Studio|imgui-studio", "endsPattern": "ImGui Studio\\s+->|already running|imgui-studio:" } }
+    },
+    {
+      "label": "ImGui Studio: Resonance example",
+      "type": "shell",
+      "command": "node bin/imgui-studio.js serve --project examples/resonance --port 7421 --open",
+      "isBackground": true,
+      "presentation": { "group": "studio", "panel": "dedicated" },
+      "problemMatcher": { "owner": "imgui-studio", "pattern": { "regexp": "^\\0$" }, "background": { "activelyMatching": true, "beginsPattern": "ImGui Studio|imgui-studio", "endsPattern": "ImGui Studio\\s+->|already running|imgui-studio:" } }
+    },
+    {
+      "label": "ImGui Studio: setup",
+      "detail": "npm install, then install Emscripten (and a Chromium if needed) and check everything",
+      "type": "shell",
+      "command": "npm install && npm run setup",
+      "problemMatcher": []
+    },
+    {
+      "label": "ImGui Studio: design agent",
+      "detail": "Run the Claude Code menu designer (skill always loaded) on a new project",
+      "type": "process",
+      "command": "node",
+      "args": ["bin/imgui-studio.js", "agent", "${input:brief}", "--new", "${input:projectDir}", "--budget", "${input:budget}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "ImGui Studio: tests",
+      "type": "shell",
+      "command": "npm test",
+      "group": "test",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    { "id": "brief", "type": "promptString", "description": "What should the agent design?", "default": "Design the settings window for a music production app: sidebar navigation, a preset selector, and audio, MIDI and appearance pages" },
+    { "id": "projectDir", "type": "promptString", "description": "New project folder", "default": "my-menu" },
+    { "id": "budget", "type": "promptString", "description": "Max spend in USD", "default": "5" }
+  ]
+}

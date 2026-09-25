@@ -1,0 +1,25 @@
+{
+  // F5 in Cursor / VS Code: run the Studio server under the debugger.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ImGui Studio (showcase)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/imgui-studio.js",
+      "args": ["serve", "--port", "7420", "--open"],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "ImGui Studio (Resonance example)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/imgui-studio.js",
+      "args": ["serve", "--project", "examples/resonance", "--port", "7421", "--open"],
+      "console": "integratedTerminal"
+    }
+  ],
+  "compounds": [
+    { "name": "ImGui Studio (both)", "configurations": ["ImGui Studio (showcase)", "ImGui Studio (Resonance example)"] }
+  ]
+}

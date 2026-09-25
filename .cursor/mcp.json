@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "imgui-studio": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/bin/imgui-studio.js", "mcp"]
+    }
+  }
+}

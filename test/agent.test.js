@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { STUDIO_ROOT } from '../server/config.js';
-import { buildClaudeArgs, buildSystemPrompt, buildTask, createRenderer, MCP_ALLOW } from '../server/agent.js';
+import { buildClaudeArgs, buildSystemPrompt, buildTask, claudeCommand, createRenderer, MCP_ALLOW } from '../server/agent.js';
 import { AGENT_NAME, SKILL_FILE, SKILL_IMPORT, SKILL_NAME, createProject, installAgentKit, subagentDefinition } from '../server/scaffold.js';
 import { exportProject } from '../server/exporter.js';
 
@@ -67,6 +67,16 @@ describe('design agent', () => {
     assert.equal(flag('--max-budget-usd'), '3');
   });
 
+  it("starts npm's Windows .cmd shim through its JavaScript entry point", () => {
+    const dir = tmp('npm-prefix');
+    const pkg = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code');
+    fs.mkdirSync(pkg, { recursive: true });
+    fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ bin: { claude: 'cli.js' } }));
+    fs.writeFileSync(path.join(pkg, 'cli.js'), '');
+    assert.deepEqual(claudeCommand(path.join(dir, 'claude.cmd')), [process.execPath, [path.join(pkg, 'cli.js')]]);
+    assert.deepEqual(claudeCommand('/usr/local/bin/claude'), ['/usr/local/bin/claude', []]);
+  });
+
   it('adds reference instructions to the task', () => {
     const t = buildTask({ brief: 'Recreate this menu', reference: '/abs/ref.png', studioUrl: 'http://localhost:7420' });
     assert.match(t, /Reference design: \/abs\/ref\.png/);
@@ -80,6 +90,22 @@ describe('design agent', () => {
     assert.match(def, /tools: .*mcp__imgui-studio__\*/);
     const repoCopy = fs.readFileSync(path.join(STUDIO_ROOT, '.claude', 'agents', `${AGENT_NAME}.md`), 'utf8');
     assert.equal(repoCopy, def, 'run `node bin/imgui-studio.js agent-kit --repo` after editing agent/designer.md');
+  });
+
+  it('wires Cursor: the Studio MCP server, an always-applied rule with the skill, run tasks', () => {
+    const mcp = JSON.parse(fs.readFileSync(path.join(STUDIO_ROOT, '.cursor', 'mcp.json'), 'utf8'));
+    assert.deepEqual(mcp.mcpServers['imgui-studio'].args, ['${workspaceFolder}/bin/imgui-studio.js', 'mcp']);
+    const rule = fs.readFileSync(path.join(STUDIO_ROOT, '.cursor', 'rules', 'imgui-menu-designer.mdc'), 'utf8');
+    assert.match(rule, /^---\n(?:.*\n)*?alwaysApply: true\n(?:.*\n)*?---\n/);
+    const refs = [...rule.matchAll(/@([\w./-]+\.md)\b/g)].map((m) => m[1]);
+    assert.ok(refs.includes('.claude/skills/imgui-premium-menu-design/SKILL.md'), 'the rule must pull in the full skill');
+    assert.ok(refs.includes('agent/designer.md'));
+    for (const r of refs) assert.ok(fs.existsSync(path.join(STUDIO_ROOT, r)), `${r} referenced by the Cursor rule`);
+    const jsonc = (f) => JSON.parse(fs.readFileSync(path.join(STUDIO_ROOT, '.vscode', f), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
+    const tasks = jsonc('tasks.json').tasks;
+    const all = tasks.find((t) => t.runOptions?.runOn === 'folderOpen');
+    for (const dep of all.dependsOn) assert.ok(tasks.some((t) => t.label === dep), dep);
+    assert.equal(jsonc('launch.json').configurations.length, 2);
   });
 
   it('renders stream-json progress', () => {

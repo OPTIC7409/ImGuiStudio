@@ -8,13 +8,16 @@
     "imgui-studio": "bin/imgui-studio.js"
   },
   "scripts": {
-    "start": "node bin/imgui-studio.js serve",
+    "setup": "node scripts/setup.js",
+    "start": "node bin/imgui-studio.js serve --open",
+    "resonance": "node bin/imgui-studio.js serve --project examples/resonance --port 7421 --open",
+    "doctor": "node bin/imgui-studio.js doctor",
     "mcp": "node bin/imgui-studio.js mcp",
     "build": "node bin/imgui-studio.js build",
     "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "engines": {
-    "node": ">=20.10"
+    "node": ">=22"
   },
   "dependencies": {
     "jpeg-js": "^0.4.4",

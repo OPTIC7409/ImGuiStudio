@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ImGui Studio command line.
 //
-//   imgui-studio serve  [--project DIR] [--port N] [--no-headless]   Studio UI + API (+ headless agent preview)
+//   imgui-studio serve  [--project DIR] [--port N] [--no-headless] [--open]  Studio UI + API (+ headless agent preview)
 //   imgui-studio mcp    [--project DIR] [--port N]                   MCP server on stdio (starts or reuses the Studio server)
 //   imgui-studio agent  "<brief>" [--project DIR | --new DIR] [--reference IMG] [--model ID] [--effort LEVEL]
 //                       [--budget USD] [--max-turns N] [--dry-run]    run the ImGui Menu Designer (Claude Code, headless)
@@ -12,6 +12,7 @@
 //   imgui-studio doctor                                              check toolchain, browser and Claude Code
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { STUDIO_ROOT, findToolchain } from '../server/config.js';
 import { Studio } from '../server/studio.js';
 import { startStudio } from '../server/launch.js';
@@ -19,9 +20,19 @@ import { localCaller, remoteCaller, runMcpServer } from '../server/mcp.js';
 import { runOp } from '../server/ops.js';
 import { createProject, installAgentKit, listTemplates, subagentDefinition, AGENT_NAME } from '../server/scaffold.js';
 import { findClaude, runDesignAgent } from '../server/agent.js';
+import { findBrowser } from '../server/headless.js';
 import { log } from '../server/util.js';
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'no-headless', 'no-agent-kit', 'build', 'repo', 'check']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'no-headless', 'no-agent-kit', 'build', 'repo', 'check', 'open']);
+
+// Open a URL in the default browser (serve --open). On Windows the empty argument is
+// start's window title (Node passes it as ""), so the URL is not taken as the title.
+function openInBrowser(url) {
+  const [cmd, argv] = process.platform === 'darwin' ? ['open', [url]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : ['xdg-open', [url]];
+  const child = spawn(cmd, argv, { stdio: 'ignore', detached: true, windowsHide: true });
+  child.on('error', () => log(`could not open a browser; visit ${url}`));
+  child.unref();
+}
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -92,6 +103,7 @@ async function main() {
     } catch {
       report.playwright_core = 'missing (npm install playwright-core) - headless agent preview disabled';
     }
+    report.browser = findBrowser() || 'no Chrome/Chromium/Edge found - run `npx playwright-core install chromium` or set IMGUI_STUDIO_BROWSER';
     report.claude_code = findClaude() || 'not found (needed for `imgui-studio agent`)';
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     return;
@@ -164,10 +176,12 @@ async function main() {
     const r = await startStudio(projectDir, { port: args.port, host: args.host || '127.0.0.1', headless: !args['no-headless'] });
     if (r.reuse) {
       process.stderr.write(`ImGui Studio is already running for this project: ${r.reuse}\n`);
+      if (args.open) openInBrowser(r.reuse);
       return;
     }
     const { studio, port } = r;
     process.stderr.write(`\n  ImGui Studio  ->  http://localhost:${port}\n  project: ${projectDir}\n\n`);
+    if (args.open) openInBrowser(`http://localhost:${port}`);
     if (studio.latestBuildId() == null || args.build) {
       studio.build({ source: 'startup', capture: true }).catch((e) => log('initial build failed:', e.message));
     } else if (studio.settings.headless !== false) {

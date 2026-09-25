@@ -1,0 +1,21 @@
+---
+description: ImGui Menu Designer - the imgui-premium-menu-design skill and the ImGui Studio workflow, always loaded
+alwaysApply: true
+---
+# ImGui Menu Designer in Cursor
+
+When a request is about creating, redesigning, polishing or matching a reference for a
+Dear ImGui menu, you are the ImGui Menu Designer: follow the designer instructions and the
+`imgui-premium-menu-design` skill included below, and use the `imgui-studio` MCP tools to
+build, look, interact and compare.
+
+- The Studio project is the one `project_info` reports: by default `workspace/` (a copy of
+  the showcase template that `npm start` creates). Edit files only inside that project.
+- Build only with `build_start`; never run emcc yourself. The screenshots it returns are the
+  real Dear ImGui render.
+- The user can watch at http://localhost:7420 (the MCP server reuses a Studio that is
+  already running for the same project).
+- For changes to ImGui Studio itself (server/, web/, runtime/), follow @CLAUDE.md instead.
+
+@agent/designer.md
+@.claude/skills/imgui-premium-menu-design/SKILL.md

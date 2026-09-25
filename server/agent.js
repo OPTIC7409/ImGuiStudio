@@ -20,10 +20,32 @@ export function findClaude() {
   const explicit = process.env.IMGUI_STUDIO_CLAUDE;
   if (explicit) return explicit;
   try {
-    return execFileSync(process.platform === 'win32' ? 'where' : 'which', ['claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split(/\r?\n/)[0].trim() || null;
+    const found = execFileSync(process.platform === 'win32' ? 'where' : 'which', ['claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (process.platform !== 'win32') return found[0] || null;
+    // `where` also lists npm's extensionless shell shim, which Windows cannot run.
+    return found.find((f) => /\.exe$/i.test(f)) || found.find((f) => /\.cmd$/i.test(f)) || null;
   } catch {
     return null;
   }
+}
+
+// [command, leading args] to start Claude Code. Node cannot spawn npm's .cmd shim on
+// Windows without a shell, so run the package's JavaScript entry point directly.
+export function claudeCommand(claude) {
+  if (!/\.cmd$/i.test(claude)) return [claude, []];
+  const pkgDir = path.join(path.dirname(claude), 'node_modules', '@anthropic-ai', 'claude-code');
+  try {
+    const bin = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')).bin;
+    const entry = path.join(pkgDir, typeof bin === 'string' ? bin : bin.claude);
+    if (/\.[cm]?js$/.test(entry) && fs.existsSync(entry)) return [process.execPath, [entry]];
+    if (fs.existsSync(entry)) return [entry, []];
+  } catch {
+    // fall through
+  }
+  throw new Error(`Cannot start ${claude} without a shell. Install the native Claude Code build (https://code.claude.com) or set IMGUI_STUDIO_CLAUDE to claude.exe.`);
 }
 
 export function buildSystemPrompt(projectDir) {
@@ -197,7 +219,8 @@ export async function runDesignAgent({ projectDir, brief, reference = null, port
     onAssistantText: (t) => narrate(studio, studioUrl, t),
   });
 
-  const child = spawn(claude, args, { cwd: projectDir, env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const [cmd, lead] = claudeCommand(claude);
+  const child = spawn(cmd, [...lead, ...args], { cwd: projectDir, env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
   child.stdin.end(task);
   let buf = '';
   child.stdout.on('data', (d) => {

@@ -99,7 +99,7 @@ export class Builder {
 
   flagsFor(cfg, imguiDir, { core }) {
     const flags = [`-std=${cfg.cxx_std}`, '-DIMGUI_STUDIO', '-DIMGUI_USER_CONFIG="imconfig_studio.h"'];
-    if (cfg.imconfig) flags.push(`-DIMGUI_STUDIO_PROJECT_CONFIG="${path.resolve(this.projectDir, cfg.imconfig)}"`);
+    if (cfg.imconfig) flags.push(`-DIMGUI_STUDIO_PROJECT_CONFIG="${toPosix(path.resolve(this.projectDir, cfg.imconfig))}"`);
     for (const d of cfg.defines) flags.push(`-D${d}`);
     if (!core) {
       for (const inc of cfg.include_dirs) {
@@ -153,7 +153,7 @@ export class Builder {
     const tmpObj = `${obj}.${process.pid}.tmp`;
     const args = [...flags, '-c', src, '-o', tmpObj, '-MMD', '-MF', depFile];
     const started = Date.now();
-    const res = await run(tc.emxx, args, { env: tc.env, cwd: this.projectDir });
+    const res = await run(...tc.command('em++', args), { env: tc.env, cwd: this.projectDir });
     const ms = Date.now() - started;
     if (res.code !== 0) {
       await fsp.rm(tmpObj, { force: true });
@@ -237,7 +237,7 @@ export class Builder {
       emit('link: no object changed, reusing previous output\n');
     } else {
       const t0 = Date.now();
-      const res = await run(tc.emxx, [...objs, '-o', path.join(outDir, 'app.js'), ...linkFlags], { env: tc.env, cwd: this.projectDir });
+      const res = await run(...tc.command('em++', [...objs, '-o', path.join(outDir, 'app.js'), ...linkFlags]), { env: tc.env, cwd: this.projectDir });
       linkMs = Date.now() - t0;
       if (res.output.trim()) emit(res.output.endsWith('\n') ? res.output : `${res.output}\n`);
       const linkDiags = parseDiagnostics(res.output, mapPath);

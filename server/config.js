@@ -65,6 +65,29 @@ export function imguiDirFor(projectDir, cfg) {
 }
 
 let toolchainCache = null;
+const WIN = process.platform === 'win32';
+
+// emcc / em++ are launchers for emcc.py / em++.py. The Studio runs the Python entry
+// points directly (as the launchers do): on Windows the launchers are .bat files,
+// which Node can only start through cmd.exe, with its quoting rules and 8 KB limit.
+function findPython(emsdk, env) {
+  if (env.EMSDK_PYTHON && fs.existsSync(env.EMSDK_PYTHON)) return env.EMSDK_PYTHON;
+  const base = emsdk && path.join(emsdk, 'python');
+  if (base && fs.existsSync(base)) {
+    for (const v of fs.readdirSync(base).sort().reverse()) {
+      const exe = path.join(base, v, WIN ? 'python.exe' : path.join('bin', 'python3'));
+      if (fs.existsSync(exe)) return exe;
+    }
+  }
+  return WIN ? 'python' : 'python3';
+}
+
+// [command, args] that runs an Emscripten tool ('emcc' or 'em++').
+function toolCommand(emDir, python, tool, args) {
+  const script = path.join(emDir, `${tool}.py`);
+  if (fs.existsSync(script)) return [python, ['-E', script, ...args]];
+  return [path.join(emDir, WIN ? `${tool}.bat` : tool), args];
+}
 
 // Locate Emscripten. Honours EMSDK / EMCC env vars, PATH, and common install locations.
 export function findToolchain() {
@@ -73,10 +96,10 @@ export function findToolchain() {
   if (process.env.EMCC) candidates.push({ emcc: process.env.EMCC });
   const emsdkDirs = [process.env.EMSDK, path.join(os.homedir(), 'emsdk'), '/opt/emsdk', '/usr/local/emsdk', 'C:\\emsdk'].filter(Boolean);
   for (const dir of emsdkDirs) {
-    candidates.push({ emcc: path.join(dir, 'upstream', 'emscripten', process.platform === 'win32' ? 'emcc.bat' : 'emcc'), emsdk: dir });
+    candidates.push({ emcc: path.join(dir, 'upstream', 'emscripten', WIN ? 'emcc.bat' : 'emcc'), emsdk: dir });
   }
   try {
-    const which = execFileSync(process.platform === 'win32' ? 'where' : 'which', ['emcc'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    const which = execFileSync(WIN ? 'where' : 'which', ['emcc'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
       .split(/\r?\n/)[0]
       .trim();
     if (which) candidates.unshift({ emcc: which });
@@ -86,32 +109,36 @@ export function findToolchain() {
   for (const c of candidates) {
     if (!c.emcc || !fs.existsSync(c.emcc)) continue;
     const emDir = path.dirname(c.emcc);
-    const emxx = path.join(emDir, process.platform === 'win32' ? 'em++.bat' : 'em++');
     const env = { ...process.env };
+    delete env._PYTHON_SYSCONFIGDATA_NAME;
     const emsdk = c.emsdk || (path.basename(path.dirname(emDir)) === 'upstream' ? path.dirname(path.dirname(emDir)) : null);
     if (emsdk) {
       env.EMSDK = emsdk;
       const cfgFile = path.join(emsdk, '.emscripten');
       if (!env.EM_CONFIG && fs.existsSync(cfgFile)) env.EM_CONFIG = cfgFile;
-      // emsdk-provided node/python on PATH, like emsdk_env.sh does.
+      // emsdk-provided node/python on PATH, like emsdk_env does.
       const extra = [emDir];
       for (const sub of ['node', 'python']) {
         const base = path.join(emsdk, sub);
         if (!fs.existsSync(base)) continue;
         for (const v of fs.readdirSync(base)) {
-          const bin = path.join(base, v, 'bin');
-          if (fs.existsSync(bin)) extra.push(bin);
+          for (const bin of [path.join(base, v, 'bin'), path.join(base, v)]) {
+            if (fs.existsSync(bin) && !extra.includes(bin)) extra.push(bin);
+          }
         }
       }
       env.PATH = [...extra, env.PATH].join(path.delimiter);
     }
-    let version = 'unknown';
+    const python = findPython(emsdk, env);
+    const command = (tool, args) => toolCommand(emDir, python, tool, args);
+    let version;
     try {
-      version = execFileSync(c.emcc, ['--version'], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).split('\n')[0].trim();
+      const [cmd, args] = command('emcc', ['--version']);
+      version = execFileSync(cmd, args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).split(/\r?\n/)[0].trim();
     } catch {
       continue;
     }
-    toolchainCache = { emcc: c.emcc, emxx, env, version, emsdk };
+    toolchainCache = { emcc: c.emcc, env, version, emsdk, python, command };
     return toolchainCache;
   }
   return null;

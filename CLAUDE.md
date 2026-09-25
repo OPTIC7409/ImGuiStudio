@@ -3,6 +3,7 @@
 Node (ESM, no build step) server + C++ runtime compiled with Emscripten + plain-JS web UI.
 
 ## Commands
+- `npm install && npm run setup` - installs Emscripten / a Chromium when missing, builds both examples
 - `npm test` - unit, agent-wiring and end-to-end tests (e2e needs emcc + Chromium; skips otherwise)
 - `node bin/imgui-studio.js serve --project <dir>` - run the Studio against a project
 - `node bin/imgui-studio.js build --project <dir>` - one-shot build, JSON result
@@ -18,3 +19,10 @@ Node (ESM, no build step) server + C++ runtime compiled with Emscripten + plain-
 ## Design agent
 - `server/agent.js` runs Claude Code headless; `server/scaffold.js` writes the per-project kit.
 - The design skill (`.claude/skills/imgui-premium-menu-design/SKILL.md`) is the user's; keep it verbatim.
+- Cursor gets the same setup from `.cursor/mcp.json` and the always-applied `.cursor/rules/imgui-menu-designer.mdc`
+  (it `@`-references `agent/designer.md` and the skill; a test checks the references exist).
+
+## Platforms
+- Emscripten is run through its Python entry points (`emcc.py` / `em++.py`, see `toolCommand` in `server/config.js`),
+  never the `.bat` launchers, so Windows needs no shell. CI (`.github/workflows/ci.yml`) runs setup, tests and a native
+  CMake build of the exported Resonance example on Linux, macOS and Windows.

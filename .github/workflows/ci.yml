@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache emsdk
+        uses: actions/cache@v4
+        with:
+          path: ~/emsdk
+          key: emsdk-6.0.10-${{ runner.os }}-${{ runner.arch }}
+
+      - run: npm ci
+
+      # The same one-command setup users run: installs Emscripten when missing,
+      # finds the browser, builds the showcase and the Resonance example.
+      - run: npm run setup
+
+      - run: npm run doctor
+
+      - run: npm test
+
+      - name: Export Resonance and build it natively (CMake + GLFW + OpenGL)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update -q && sudo apt-get install -y -q libglfw3-dev libgl-dev; fi
+          node bin/imgui-studio.js export --project examples/resonance --dest "$RUNNER_TEMP/resonance-native"
+          cmake -S "$RUNNER_TEMP/resonance-native" -B "$RUNNER_TEMP/resonance-native/build" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/resonance-native/build" --config Release --parallel

@@ -30,21 +30,51 @@ the showcase project).
 
 ## Quick start
 
-Requirements: Node 20+, [Emscripten](https://emscripten.org/docs/getting_started/downloads.html)
-(emsdk; found via `EMSDK`, `PATH`, `~/emsdk` or `/opt/emsdk`), and a Chromium for the
-headless agent preview (Playwright's Chromium or system Chrome; override with
-`IMGUI_STUDIO_BROWSER`). `imgui-studio doctor` checks all three.
+Requirements: [Node 22+](https://nodejs.org) and Git. On Windows, also Python 3
+(emsdk needs it to install itself). `npm run setup` installs the rest when it is missing:
+[Emscripten](https://emscripten.org) (emsdk into `~/emsdk`, or `$EMSDK`), and a Chromium
+for the headless agent preview (Chrome, Chromium or Edge are used when installed). It then
+builds both example projects once, so the first start is fast.
 
 ```sh
+git clone -b claude/brave-mccarthy-60wtxw https://github.com/OPTIC7409/ImGuiStudio.git
+cd ImGuiStudio
 npm install
-npm start                                   # Studio UI on http://localhost:7420 (creates ./workspace from the showcase)
-node bin/imgui-studio.js new my-menu        # new project from a template (showcase | minimal)
-node bin/imgui-studio.js serve --project my-menu
+npm run setup          # Emscripten + browser if missing, then first builds
+npm start              # Studio with the showcase project   -> http://localhost:7420
+npm run resonance      # Studio with the agent-built menu   -> http://localhost:7421
 ```
 
-The first build compiles Dear ImGui once (~5 s) into a shared cache; after that
-only changed files recompile. An edit to one file typically goes from save to a
+`npm start` copies the showcase template into `./workspace` (git-ignored) the first
+time. `node bin/imgui-studio.js new my-menu` creates a project from a template
+(`showcase` or `minimal`); open it with `serve --project my-menu`. `npm run doctor`
+reports what the Studio found (Emscripten, browser, Claude Code).
+
+After the first build, which compiles Dear ImGui once into a shared cache, only
+changed files recompile. An edit to one file typically goes from save to a
 reloaded preview and screenshot in 0.5-1 s.
+
+### In Cursor
+
+Open the folder in Cursor (`cursor .`). The repository includes Cursor configuration:
+
+| File | What it does |
+|---|---|
+| [`.vscode/tasks.json`](.vscode/tasks.json) | **ImGui Studio: run everything** (default build task, Ctrl/Cmd+Shift+B) starts both Studios and opens them in your browser. It also runs when the folder opens once you allow automatic tasks. Other tasks: setup, tests, and the design agent (prompts for a brief). |
+| [`.vscode/launch.json`](.vscode/launch.json) | F5 runs a Studio under the Node debugger |
+| [`.cursor/mcp.json`](.cursor/mcp.json) | Gives Cursor's agent the `imgui-studio` tools (build, screenshot, inspect, click, compare, export) on `workspace/`. Enable the server under Cursor Settings > MCP. |
+| [`.cursor/rules/imgui-menu-designer.mdc`](.cursor/rules/imgui-menu-designer.mdc) | Always-applied rule that loads the designer instructions and the full `imgui-premium-menu-design` skill into every Agent chat |
+
+So in Cursor's Agent chat you can ask "Redesign the menu in workspace/ as a dark audio
+plugin settings window" and it will edit the C++, build with `build_start`, look at the
+real render and iterate, while you watch the Studio at http://localhost:7420.
+
+### Examples
+
+- [`examples/resonance`](examples/resonance): the settings window the design agent built on its own
+  from a short brief (84 turns, 9 builds, about 12 minutes). Five pages: General, Audio,
+  MIDI, Appearance, Shortcuts.
+- [`templates/showcase`](templates/showcase): "Nova", a hand-written custom settings UI.
 
 ## The ImGui Menu Designer agent
 
@@ -229,7 +259,10 @@ runtime/
 web/                     Studio UI and the preview runtime page
 agent/designer.md        the designer agent's instructions
 .claude/                 the design skill and the designer subagent
+.cursor/ .vscode/        Cursor: MCP server, always-on design rule, run tasks
+scripts/setup.js         npm run setup (Emscripten, browser, first builds)
 templates/               showcase ("Nova" custom settings UI) and minimal projects
+examples/resonance/      the menu the design agent built
 third_party/imgui/       Dear ImGui v1.92.9b (see STUDIO_PATCHES.md)
 ```
 
