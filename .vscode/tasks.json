@@ -29,9 +29,16 @@
     },
     {
       "label": "ImGui Studio: setup",
-      "detail": "npm install, then install Emscripten (and a Chromium if needed) and check everything",
+      "detail": "npm install, then install Emscripten (and a Chromium if needed) and build both projects",
       "type": "shell",
-      "command": "npm install && npm run setup",
+      "command": "npm run setup",
+      "dependsOn": ["ImGui Studio: npm install"],
+      "problemMatcher": []
+    },
+    {
+      "label": "ImGui Studio: npm install",
+      "type": "shell",
+      "command": "npm install",
       "problemMatcher": []
     },
     {

@@ -206,6 +206,17 @@ export class Builder {
       return this.result({ buildId, started, success: false, log, errors: [{ severity: 'error', file: 'studio.json', line: 0, column: 0, message: 'No source files matched "sources" in studio.json' }] });
     }
 
+    // On case-insensitive filesystems (macOS, Windows) a VERSION file in an include
+    // directory is found for the standard <version> header and breaks every compile.
+    for (const inc of cfg.include_dirs) {
+      if (fs.existsSync(path.join(this.projectDir, inc, 'version'))) {
+        const file = toPosix(path.join(inc, fs.readdirSync(path.join(this.projectDir, inc)).find((f) => f.toLowerCase() === 'version')));
+        const message = `${file} shadows the C++ standard header <version> because "${inc}" is in include_dirs: rename the file (e.g. VERSION.txt) or remove "${inc}" from include_dirs in studio.json`;
+        emit(`error: ${message}\n`);
+        return this.result({ buildId, started, success: false, log, errors: [{ severity: 'error', file, line: 0, column: 0, message }] });
+      }
+    }
+
     const jobs = Math.max(1, os.cpus().length);
     const results = await mapLimit(units, jobs, async (u) => {
       const r = await this.compileUnit(tc, u);
