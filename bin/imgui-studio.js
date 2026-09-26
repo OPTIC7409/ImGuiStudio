@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { STUDIO_ROOT, findToolchain } from '../server/config.js';
+import { STUDIO_ROOT, findToolchain, lastToolchainProblem } from '../server/config.js';
 import { Studio } from '../server/studio.js';
 import { startStudio } from '../server/launch.js';
 import { localCaller, remoteCaller, runMcpServer } from '../server/mcp.js';
@@ -96,7 +96,7 @@ async function main() {
 
   if (cmd === 'doctor') {
     const tc = findToolchain();
-    const report = { node: process.version, emscripten: tc ? tc.version : 'NOT FOUND (install emsdk and activate it, or set EMSDK)', emcc: tc?.emcc };
+    const report = { node: process.version, emscripten: tc ? tc.version : `NOT FOUND: ${lastToolchainProblem()} - run npm run setup, or set EMSDK`, emcc: tc?.emcc };
     try {
       await import('playwright-core');
       report.playwright_core = 'installed';

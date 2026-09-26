@@ -65,11 +65,12 @@ export function imguiDirFor(projectDir, cfg) {
 }
 
 let toolchainCache = null;
+let toolchainProblem = null;
 const WIN = process.platform === 'win32';
 
 // emcc / em++ are launchers for emcc.py / em++.py. The Studio runs the Python entry
-// points directly (as the launchers do): on Windows the launchers are .bat files,
-// which Node can only start through cmd.exe, with its quoting rules and 8 KB limit.
+// points directly (as the launchers do): on Windows the launchers are batch files or
+// small executables, and Node can start .bat files only through cmd.exe.
 function findPython(emsdk, env) {
   if (env.EMSDK_PYTHON && fs.existsSync(env.EMSDK_PYTHON)) return env.EMSDK_PYTHON;
   const base = emsdk && path.join(emsdk, 'python');
@@ -82,33 +83,45 @@ function findPython(emsdk, env) {
   return WIN ? 'python' : 'python3';
 }
 
+function launcher(emDir, tool) {
+  const names = WIN ? [`${tool}.exe`, `${tool}.bat`] : [tool];
+  return names.map((n) => path.join(emDir, n)).find((f) => fs.existsSync(f)) || null;
+}
+
 // [command, args] that runs an Emscripten tool ('emcc' or 'em++').
 function toolCommand(emDir, python, tool, args) {
   const script = path.join(emDir, `${tool}.py`);
   if (fs.existsSync(script)) return [python, ['-E', script, ...args]];
-  return [path.join(emDir, WIN ? `${tool}.bat` : tool), args];
+  return [launcher(emDir, tool) || path.join(emDir, tool), args];
+}
+
+// Why the last findToolchain() call found nothing (for setup and doctor).
+export function lastToolchainProblem() {
+  return toolchainProblem;
 }
 
 // Locate Emscripten. Honours EMSDK / EMCC env vars, PATH, and common install locations.
 export function findToolchain() {
   if (toolchainCache) return toolchainCache;
+  toolchainProblem = 'no Emscripten found (looked at $EMCC, PATH, $EMSDK, ~/emsdk, /opt/emsdk, /usr/local/emsdk, C:\\emsdk)';
+  // Each candidate is an emscripten directory (the one containing emcc.py).
   const candidates = [];
-  if (process.env.EMCC) candidates.push({ emcc: process.env.EMCC });
-  const emsdkDirs = [process.env.EMSDK, path.join(os.homedir(), 'emsdk'), '/opt/emsdk', '/usr/local/emsdk', 'C:\\emsdk'].filter(Boolean);
-  for (const dir of emsdkDirs) {
-    candidates.push({ emcc: path.join(dir, 'upstream', 'emscripten', WIN ? 'emcc.bat' : 'emcc'), emsdk: dir });
-  }
+  if (process.env.EMCC) candidates.push({ emDir: path.dirname(process.env.EMCC) });
   try {
     const which = execFileSync(WIN ? 'where' : 'which', ['emcc'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
       .split(/\r?\n/)[0]
       .trim();
-    if (which) candidates.unshift({ emcc: which });
+    if (which) candidates.push({ emDir: path.dirname(which) });
   } catch {
     // not on PATH
   }
+  for (const dir of [process.env.EMSDK, path.join(os.homedir(), 'emsdk'), '/opt/emsdk', '/usr/local/emsdk', 'C:\\emsdk'].filter(Boolean)) {
+    candidates.push({ emDir: path.join(dir, 'upstream', 'emscripten'), emsdk: dir });
+  }
   for (const c of candidates) {
-    if (!c.emcc || !fs.existsSync(c.emcc)) continue;
-    const emDir = path.dirname(c.emcc);
+    const { emDir } = c;
+    const emcc = fs.existsSync(path.join(emDir, 'emcc.py')) ? path.join(emDir, 'emcc.py') : launcher(emDir, 'emcc');
+    if (!emcc) continue;
     const env = { ...process.env };
     delete env._PYTHON_SYSCONFIGDATA_NAME;
     const emsdk = c.emsdk || (path.basename(path.dirname(emDir)) === 'upstream' ? path.dirname(path.dirname(emDir)) : null);
@@ -135,10 +148,12 @@ export function findToolchain() {
     try {
       const [cmd, args] = command('emcc', ['--version']);
       version = execFileSync(cmd, args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).split(/\r?\n/)[0].trim();
-    } catch {
+    } catch (e) {
+      toolchainProblem = `${emcc} --version failed: ${String(e.stderr || '').trim() || e.message}`;
       continue;
     }
-    toolchainCache = { emcc: c.emcc, env, version, emsdk, python, command };
+    toolchainProblem = null;
+    toolchainCache = { emcc, env, version, emsdk, python, command };
     return toolchainCache;
   }
   return null;

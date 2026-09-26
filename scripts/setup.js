@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { STUDIO_ROOT, findToolchain } from '../server/config.js';
+import { STUDIO_ROOT, findToolchain, lastToolchainProblem } from '../server/config.js';
 import { findBrowser } from '../server/headless.js';
 import { findClaude } from '../server/agent.js';
 
@@ -65,6 +65,7 @@ if (!tc) {
 }
 if (tc) process.stdout.write(`${tc.version}\n  ${tc.emcc}\n`);
 else {
+  process.stdout.write(`${lastToolchainProblem()}\n`);
   problems.push(
     'Emscripten could not be installed automatically. Install emsdk by hand (https://emscripten.org/docs/getting_started/downloads.html)' +
       `${WIN ? '; on Windows emsdk needs Python 3 and Git on PATH' : ''}, then set EMSDK to its folder.`,
