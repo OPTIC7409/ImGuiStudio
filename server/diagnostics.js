@@ -1,4 +1,5 @@
 // Parse clang / wasm-ld / emcc output into structured, agent-friendly diagnostics.
+import fs from 'node:fs';
 import path from 'node:path';
 import { toPosix } from './util.js';
 
@@ -12,16 +13,37 @@ const LD_DEFINED_RE = /^>>> defined in (.*)$/;
 const LD_GENERIC_RE = /^wasm-ld: (error|warning): (.*)$/;
 const EMCC_RE = /^(?:em\+\+|emcc)(?:\.py)?: (error|warning): (.*)$/;
 
+// The compiler may report symlink-resolved paths (macOS: /var -> /private/var), so a
+// root matches both as given and as its real path.
+function withRealPath(dir) {
+  try {
+    const real = fs.realpathSync.native(dir);
+    return real === dir ? [dir] : [dir, real];
+  } catch {
+    return [dir];
+  }
+}
+
+function relativeInside(roots, abs) {
+  for (const root of roots) {
+    const rel = path.relative(root, abs);
+    if (!rel.startsWith('..') && !path.isAbsolute(rel)) return toPosix(rel);
+  }
+  return null;
+}
+
 export function makePathMapper({ projectDir, studioRoot, objToSource = new Map() }) {
+  const projectRoots = withRealPath(projectDir);
+  const studioRoots = withRealPath(studioRoot);
   return function mapPath(p) {
     if (!p) return { file: null, external: true };
     const src = objToSource.get(p) || objToSource.get(path.resolve(p));
     if (src) p = src;
     const abs = path.isAbsolute(p) ? p : path.resolve(projectDir, p);
-    const relProject = path.relative(projectDir, abs);
-    if (!relProject.startsWith('..') && !path.isAbsolute(relProject)) return { file: toPosix(relProject), external: false };
-    const relStudio = path.relative(studioRoot, abs);
-    if (!relStudio.startsWith('..') && !path.isAbsolute(relStudio)) return { file: `<studio>/${toPosix(relStudio)}`, external: true };
+    const inProject = relativeInside(projectRoots, abs);
+    if (inProject !== null) return { file: inProject, external: false };
+    const inStudio = relativeInside(studioRoots, abs);
+    if (inStudio !== null) return { file: `<studio>/${inStudio}`, external: true };
     return { file: toPosix(abs), external: true };
   };
 }

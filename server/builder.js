@@ -113,7 +113,7 @@ export class Builder {
       flags.push('-O2', '-w');
     } else {
       flags.push(cfg.optimize || '-O0', '-Wall', '-Wno-unused-function', '-Wno-unused-variable', '-Wno-unused-but-set-variable');
-      flags.push(`-ffile-prefix-map=${this.projectDir}${path.sep}=`);
+      for (const dir of new Set([this.projectDir, fs.realpathSync.native(this.projectDir)])) flags.push(`-ffile-prefix-map=${dir}${path.sep}=`);
       flags.push(...cfg.cxx_flags);
     }
     return flags;

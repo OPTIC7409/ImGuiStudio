@@ -1,6 +1,8 @@
 // Unit tests for server-side building blocks (no toolchain or browser needed).
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { makePathMapper, parseDiagnostics } from '../server/diagnostics.js';
 import { parseDepfile } from '../server/builder.js';
@@ -47,6 +49,17 @@ describe('diagnostics', () => {
     assert.equal(d[0].file, 'src/menu.cpp');
     assert.equal(d[0].linker, true);
     assert.match(d[0].message, /undefined symbol/);
+  });
+
+  it('treats symlink-resolved compiler paths as project files (macOS /var -> /private/var)', () => {
+    const real = fs.mkdtempSync(path.join(os.tmpdir(), 'imgui-studio-real-'));
+    const link = `${real}-link`;
+    fs.symlinkSync(real, link, process.platform === 'win32' ? 'junction' : 'dir');
+    const map = makePathMapper({ projectDir: link, studioRoot: STUDIO });
+    assert.deepEqual(map(path.join(real, 'src', 'main.cpp')), { file: 'src/main.cpp', external: false });
+    assert.deepEqual(map(path.join(link, 'src', 'main.cpp')), { file: 'src/main.cpp', external: false });
+    fs.rmSync(link);
+    fs.rmSync(real, { recursive: true });
   });
 });
 
