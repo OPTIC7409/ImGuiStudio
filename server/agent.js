@@ -129,6 +129,20 @@ function summarizeToolResult(block) {
   return `${summary}${images ? ` [${images} image${images > 1 ? 's' : ''}]` : ''}`;
 }
 
+// Claude Code bills ANTHROPIC_API_KEY when it is set, even if you are signed in with a
+// claude.ai subscription, so billing/auth failures usually come from a stale key.
+export function authHint(text, env = process.env) {
+  if (!/credit balance|invalid (x-)?api[ -]key|authentication|unauthorized|401/i.test(String(text || ''))) return null;
+  if (env.ANTHROPIC_API_KEY) {
+    return (
+      'ANTHROPIC_API_KEY is set, so Claude Code is billing that API key instead of your claude.ai login.\n' +
+      '  Use your subscription: unset ANTHROPIC_API_KEY   (PowerShell: Remove-Item Env:ANTHROPIC_API_KEY)\n' +
+      '  or add credits to the key at https://console.anthropic.com'
+    );
+  }
+  return 'Claude Code could not authenticate or bill this run: run `claude` once to sign in, or check your API key / credits.';
+}
+
 export function createRenderer({ write = (s) => process.stdout.write(s), onAssistantText = null } = {}) {
   const pendingTools = new Map();
   let result = null;
@@ -160,8 +174,12 @@ export function createRenderer({ write = (s) => process.stdout.write(s), onAssis
         result = msg;
         const secs = Math.round((msg.duration_ms || 0) / 1000);
         const cost = msg.total_cost_usd != null ? ` · $${Number(msg.total_cost_usd).toFixed(2)}` : '';
-        const status = msg.subtype === 'success' && !msg.is_error ? green('✓ done') : red(`✗ ${msg.subtype}`);
+        // An API error (billing, auth) ends the run with subtype "success" and is_error set.
+        const failed = msg.is_error || msg.subtype !== 'success';
+        const status = failed ? red(`✗ ${msg.subtype === 'success' ? 'failed' : msg.subtype}`) : green('✓ done');
         write(`\n${status} ${dim(`${msg.num_turns ?? '?'} turns · ${Math.floor(secs / 60)}m${secs % 60}s${cost}`)}\n`);
+        const hint = failed ? authHint(msg.result) : null;
+        if (hint) write(`${hint}\n`);
       }
     },
     get result() {

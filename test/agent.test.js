@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { STUDIO_ROOT } from '../server/config.js';
-import { buildClaudeArgs, buildSystemPrompt, buildTask, claudeCommand, createRenderer, MCP_ALLOW } from '../server/agent.js';
+import { authHint, buildClaudeArgs, buildSystemPrompt, buildTask, claudeCommand, createRenderer, MCP_ALLOW } from '../server/agent.js';
 import { AGENT_NAME, SKILL_FILE, SKILL_IMPORT, SKILL_NAME, createProject, installAgentKit, subagentDefinition } from '../server/scaffold.js';
 import { exportProject } from '../server/exporter.js';
 
@@ -119,6 +119,17 @@ describe('design agent', () => {
     assert.match(out, /build #3 ok \(812 ms\) \[1 image\]/);
     assert.match(out, /done/);
     assert.equal(r.result.num_turns, 4);
+  });
+
+  it('reports API errors as failures, with the API-key hint', () => {
+    let out = '';
+    const r = createRenderer({ write: (s) => (out += s) });
+    r.handle({ type: 'result', subtype: 'success', is_error: true, result: 'Credit balance is too low', num_turns: 1, duration_ms: 1000, total_cost_usd: 0 });
+    assert.match(out, /✗ failed/);
+    assert.doesNotMatch(out, /success/);
+    assert.match(authHint('Credit balance is too low', { ANTHROPIC_API_KEY: 'sk-x' }), /unset ANTHROPIC_API_KEY/);
+    assert.match(authHint('Invalid API key', {}), /sign in/);
+    assert.equal(authHint('Max turns reached', { ANTHROPIC_API_KEY: 'sk-x' }), null);
   });
 
   it('never exports the Claude Code kit files', async () => {
