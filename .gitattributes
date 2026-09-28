@@ -1,0 +1,7 @@
+# LF everywhere, including Windows checkouts with core.autocrlf: the agent kit is
+# generated and compared byte for byte, and the design skill is copied into projects.
+* text=auto eol=lf
+*.ttf binary
+*.png binary
+*.jpg binary
+*.wasm binary
