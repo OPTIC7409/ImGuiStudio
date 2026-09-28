@@ -52,7 +52,8 @@ describe('diagnostics', () => {
   });
 
   it('treats symlink-resolved compiler paths as project files (macOS /var -> /private/var)', () => {
-    const real = fs.mkdtempSync(path.join(os.tmpdir(), 'imgui-studio-real-'));
+    // realpath: on macOS the temp dir itself is under the /var symlink.
+    const real = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'imgui-studio-real-')));
     const link = `${real}-link`;
     fs.symlinkSync(real, link, process.platform === 'win32' ? 'junction' : 'dir');
     const map = makePathMapper({ projectDir: link, studioRoot: STUDIO });
