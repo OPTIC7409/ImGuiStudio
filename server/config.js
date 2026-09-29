@@ -164,7 +164,7 @@ export function requireToolchain() {
   if (!tc) {
     throw new StudioError(
       'no_toolchain',
-      'Emscripten (emcc) was not found. Install emsdk (https://emscripten.org/docs/getting_started/downloads.html) and either activate it, or set EMSDK=/path/to/emsdk.',
+      `Emscripten (emcc) was not found: ${toolchainProblem}. Run \`npm run setup\` in the ImGui Studio folder to install it (then build again), or set EMSDK=/path/to/emsdk.`,
     );
   }
   return tc;

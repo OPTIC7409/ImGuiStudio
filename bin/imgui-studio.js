@@ -113,6 +113,13 @@ async function main() {
   if (cmd === 'agent') {
     const brief = args._.slice(1).join(' ').trim() || (args.brief ? String(args.brief) : '');
     if (!brief) throw new Error('usage: imgui-studio agent "<what to design>" [--project DIR | --new DIR] [--reference image.png] [--dry-run]');
+    // The designer is blind without a compiler and a preview browser: check before spending anything.
+    if (!args['dry-run']) {
+      const missing = [];
+      if (!findToolchain()) missing.push(`Emscripten (${lastToolchainProblem()})`);
+      if (!args['no-headless'] && !findBrowser()) missing.push('a Chrome/Chromium/Edge browser for the preview');
+      if (missing.length) throw new Error(`cannot run the designer without ${missing.join(' and ')}.\nRun \`npm run setup\` in ${STUDIO_ROOT} to install what is missing, then try again.`);
+    }
     let projectDir;
     if (args.new) {
       projectDir = path.resolve(String(args.new));
