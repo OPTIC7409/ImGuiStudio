@@ -75,7 +75,13 @@ function findPython(emsdk, env) {
   if (env.EMSDK_PYTHON && fs.existsSync(env.EMSDK_PYTHON)) return env.EMSDK_PYTHON;
   const base = emsdk && path.join(emsdk, 'python');
   if (base && fs.existsSync(base)) {
-    for (const v of fs.readdirSync(base).sort().reverse()) {
+    const num = (v) => v.split(/[^0-9]+/).filter(Boolean).map(Number);
+    const newestFirst = (a, b) => {
+      const [x, y] = [num(a), num(b)];
+      for (let i = 0; i < Math.max(x.length, y.length); i++) if ((y[i] || 0) !== (x[i] || 0)) return (y[i] || 0) - (x[i] || 0);
+      return 0;
+    };
+    for (const v of fs.readdirSync(base).sort(newestFirst)) {
       const exe = path.join(base, v, WIN ? 'python.exe' : path.join('bin', 'python3'));
       if (fs.existsSync(exe)) return exe;
     }

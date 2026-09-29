@@ -3,7 +3,8 @@
 // browser are available (installing them if not), reports Claude Code, then builds
 // the showcase and the Resonance example once so the first `npm start` is instant.
 //
-//   npm run setup [-- --emsdk-version 6.0.10] [-- --skip-build]
+//   npm run setup [-- --emsdk-version 6.0.10] [-- --skip-build] [-- --bundled-python]
+//   (--bundled-python: install emsdk with its own standalone Python even if one is on PATH)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -33,15 +34,78 @@ function run(cmd, args, opts = {}) {
   if (r.status !== 0) throw new Error(`${cmd} ${args.join(' ')} exited with ${r.status}`);
 }
 
-function installEmscripten() {
+// emsdk and Emscripten need Python 3.10+. macOS's /usr/bin/python3 is 3.9 and Windows
+// may have no Python, so fall back to the standalone Python that emsdk itself ships
+// (the same archive `emsdk install` downloads) when none is found.
+const EMSDK_DEPS_URL = 'https://storage.googleapis.com/webassembly/emscripten-releases-builds/deps/';
+const BUNDLED_PYTHON = '3.13.3';
+
+function pythonOk(exe) {
+  if (path.isAbsolute(exe) && !fs.existsSync(exe)) return false;
+  const r = spawnSync(exe, ['-c', 'import sys; print(sys.version_info >= (3, 10))'], { encoding: 'utf8' });
+  return !r.error && r.status === 0 && r.stdout.trim() === 'True';
+}
+
+function bundledPythonDir(dir) {
+  return path.join(dir, 'python', `${BUNDLED_PYTHON}_64bit`);
+}
+
+function bundledPython(dir) {
+  return path.join(bundledPythonDir(dir), WIN ? 'python.exe' : path.join('bin', 'python3'));
+}
+
+function findBootstrapPython(dir) {
+  if (process.argv.includes('--bundled-python')) return pythonOk(bundledPython(dir)) ? bundledPython(dir) : null;
+  const candidates = [process.env.EMSDK_PYTHON, bundledPython(dir), 'python3.13', 'python3.12', 'python3.11', 'python3.10', '/opt/homebrew/bin/python3', '/usr/local/bin/python3', 'python3', 'python'];
+  return candidates.filter(Boolean).find(pythonOk) || null;
+}
+
+async function downloadBundledPython(dir) {
+  const arm = process.arch === 'arm64';
+  const file =
+    process.platform === 'darwin' ? `python-${BUNDLED_PYTHON}-0-macos-${arm ? 'arm64' : 'x86_64'}.tar.gz` : WIN ? `python-${BUNDLED_PYTHON}-0-win-${arm ? 'arm64' : 'amd64'}.zip` : null;
+  if (!file) return null; // Linux: emsdk has no Python build; use the distribution's
+  const archive = path.join(dir, 'downloads', file);
+  fs.mkdirSync(path.dirname(archive), { recursive: true });
+  process.stdout.write(`downloading ${EMSDK_DEPS_URL}${file}\n`);
+  const res = await fetch(EMSDK_DEPS_URL + file);
+  if (!res.ok) throw new Error(`downloading ${file} failed: HTTP ${res.status}`);
+  fs.writeFileSync(archive, Buffer.from(await res.arrayBuffer()));
+  const tmp = fs.mkdtempSync(path.join(dir, 'python-extract-'));
+  // Windows' own tar (bsdtar) reads zip files; Git's GNU tar, often earlier on PATH, does not.
+  const tar = WIN ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+  run(tar, ['-xf', archive, '-C', tmp]);
+  // The macOS archive has one top-level folder; the Windows one does not.
+  const entries = fs.readdirSync(tmp);
+  const root = entries.length === 1 && fs.statSync(path.join(tmp, entries[0])).isDirectory() ? path.join(tmp, entries[0]) : tmp;
+  fs.rmSync(bundledPythonDir(dir), { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(bundledPythonDir(dir)), { recursive: true });
+  fs.renameSync(root, bundledPythonDir(dir));
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return bundledPython(dir);
+}
+
+async function installEmscripten() {
   const dir = process.env.EMSDK || path.join(os.homedir(), 'emsdk');
-  if (!fs.existsSync(path.join(dir, WIN ? 'emsdk.bat' : 'emsdk'))) {
+  if (!fs.existsSync(path.join(dir, 'emsdk.py'))) {
     run('git', ['clone', '--depth', '1', 'https://github.com/emscripten-core/emsdk.git', dir]);
   }
-  // emsdk.bat is a batch file: it has to go through cmd.exe (plain arguments only).
-  const emsdk = WIN ? ['emsdk.bat', { shell: true }] : ['./emsdk', {}];
-  run(emsdk[0], ['install', EMSDK_VERSION], { cwd: dir, ...emsdk[1] });
-  run(emsdk[0], ['activate', EMSDK_VERSION], { cwd: dir, ...emsdk[1] });
+  let python = findBootstrapPython(dir);
+  if (!python) {
+    process.stdout.write('no Python 3.10 or newer found (emsdk needs it): fetching the standalone Python emsdk uses\n');
+    python = await downloadBundledPython(dir);
+    if (!python || !pythonOk(python)) {
+      throw new Error('emsdk needs Python 3.10 or newer. Install it (e.g. `sudo apt install python3`, or from https://www.python.org/downloads/) and run setup again.');
+    }
+  }
+  process.stdout.write(`using ${python}\n`);
+  // Run emsdk.py directly (what the emsdk / emsdk.bat launchers do) with the Python found above.
+  const env = { ...process.env, EMSDK_PYTHON: python };
+  if (python === bundledPython(dir)) {
+    delete env.PYTHONHOME;
+    delete env.PYTHONPATH;
+  }
+  for (const action of ['install', 'activate']) run(python, [path.join(dir, 'emsdk.py'), action, EMSDK_VERSION], { cwd: dir, env });
 }
 
 const problems = [];
@@ -57,7 +121,7 @@ let tc = findToolchain();
 if (!tc) {
   process.stdout.write(`not found: installing emsdk ${EMSDK_VERSION} into ${process.env.EMSDK || path.join(os.homedir(), 'emsdk')} (a few minutes, ~1 GB)\n`);
   try {
-    installEmscripten();
+    await installEmscripten();
   } catch (e) {
     process.stdout.write(`${e.message}\n`);
   }
@@ -67,8 +131,8 @@ if (tc) process.stdout.write(`${tc.version}\n  ${tc.emcc}\n`);
 else {
   process.stdout.write(`${lastToolchainProblem()}\n`);
   problems.push(
-    'Emscripten could not be installed automatically. Install emsdk by hand (https://emscripten.org/docs/getting_started/downloads.html)' +
-      `${WIN ? '; on Windows emsdk needs Python 3 and Git on PATH' : ''}, then set EMSDK to its folder.`,
+    'Emscripten could not be installed (the reason is printed under "== Emscripten" above). Fix that and run `npm run setup` again,' +
+      ' or install emsdk by hand (https://emscripten.org/docs/getting_started/downloads.html) and set EMSDK to its folder.',
   );
 }
 

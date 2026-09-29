@@ -26,13 +26,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/emsdk
-          key: emsdk-6.0.10-${{ runner.os }}-${{ runner.arch }}
+          key: emsdk-6.0.10-v2-${{ runner.os }}-${{ runner.arch }}
 
       - run: npm ci
 
       # The same one-command setup users run: installs Emscripten when missing,
-      # finds the browser, builds the showcase and the Resonance example.
-      - run: npm run setup
+      # finds the browser, builds the showcase and the Resonance example. On macOS and
+      # Windows it installs emsdk with emsdk's standalone Python, the path taken on
+      # machines without Python 3.10+ (a stock Mac has 3.9).
+      - run: npm run setup -- ${{ runner.os != 'Linux' && '--bundled-python' || '' }}
 
       - run: npm run doctor
 
