@@ -4,7 +4,8 @@
 //   imgui-studio serve  [--project DIR] [--port N] [--no-headless] [--open]  Studio UI + API (+ headless agent preview)
 //   imgui-studio mcp    [--project DIR] [--port N]                   MCP server on stdio (starts or reuses the Studio server)
 //   imgui-studio agent  "<brief>" [--project DIR | --new DIR] [--reference IMG] [--model ID] [--effort LEVEL]
-//                       [--budget USD] [--max-turns N] [--dry-run]    run the ImGui Menu Designer (Claude Code, headless)
+//                       [--budget USD] [--max-turns N] [--dry-run]    run the ImGui Menu Designer (Claude Code, headless);
+//                       [--no-open] [--exit]                          opens the Studio and keeps it running afterwards
 //   imgui-studio agent-kit [--project DIR]                           install the Claude Code kit (skill, subagent, .mcp.json)
 //   imgui-studio new    <dir> [--template showcase|minimal] [--name NAME] [--no-agent-kit]
 //   imgui-studio build  [--project DIR]                              one-shot build, prints the JSON result
@@ -23,7 +24,7 @@ import { findClaude, runDesignAgent } from '../server/agent.js';
 import { findBrowser } from '../server/headless.js';
 import { log } from '../server/util.js';
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'no-headless', 'no-agent-kit', 'build', 'repo', 'check', 'open']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'no-headless', 'no-agent-kit', 'build', 'repo', 'check', 'open', 'no-open', 'keep', 'exit']);
 
 // Open a URL in the default browser (serve --open). On Windows the empty argument is
 // start's window title (Node passes it as ""), so the URL is not taken as the title.
@@ -122,6 +123,10 @@ async function main() {
     }
     const r = await startStudio(projectDir, { port: args.port, headless: !args['no-headless'] });
     const studioUrl = r.reuse || `http://localhost:${r.port}`;
+    // In a terminal, show the Studio while the agent works and keep it up afterwards,
+    // so the result can be inspected; scripts and CI get a plain run-and-exit.
+    const interactive = !!process.stdout.isTTY && !process.env.CI;
+    if (interactive && !args['dry-run'] && !args['no-open']) openInBrowser(studioUrl);
     let outcome;
     try {
       outcome = await runDesignAgent({
@@ -137,11 +142,9 @@ async function main() {
         dryRun: !!args['dry-run'],
         studio: r.studio || null,
       });
-    } finally {
-      if (r.studio && !args.keep) {
-        await r.studio.shutdown();
-        r.srv.server.close();
-      }
+    } catch (e) {
+      if (r.studio) await r.studio.shutdown();
+      throw e;
     }
     if (outcome.dryRun) {
       process.stdout.write(`${JSON.stringify({ ...outcome, command: `${outcome.claude} ${outcome.args.map((a) => (/[\s*]/.test(a) ? JSON.stringify(a) : a)).join(' ')} < task` }, null, 2)}\n`);
@@ -149,6 +152,21 @@ async function main() {
       process.stderr.write(`\ntranscript: ${outcome.transcript}\n`);
       process.exitCode = outcome.success ? 0 : 1;
     }
+    if (r.studio && !outcome.dryRun && (args.keep || (interactive && !args.exit))) {
+      process.stderr.write(`\nImGui Studio is still running with the result: ${studioUrl}  (Ctrl+C to stop)\n`);
+      const stop = async () => {
+        await r.studio.shutdown();
+        process.exit(process.exitCode || 0);
+      };
+      process.on('SIGINT', stop);
+      process.on('SIGTERM', stop);
+      return;
+    }
+    if (r.studio) {
+      await r.studio.shutdown();
+      r.srv.server.close();
+    }
+    if (r.reuse && !outcome.dryRun) process.stderr.write(`\nSee the result in the Studio: ${studioUrl}\n`);
     process.exit(process.exitCode || 0);
   }
 

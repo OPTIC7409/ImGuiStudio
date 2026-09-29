@@ -97,6 +97,11 @@ How the skill stays in context for every run (never left to on-demand skill matc
 | `claude` inside a project created by `imgui-studio new` (or after `imgui-studio agent-kit`) | The project's `CLAUDE.md` `@imports` the designer instructions and the full skill at session start; `.mcp.json` configures the `imgui-studio` server |
 | `claude --agent imgui-menu-designer` in this repo, or delegating to that subagent | [`.claude/agents/imgui-menu-designer.md`](.claude/agents/imgui-menu-designer.md) preloads the skill through its `skills:` frontmatter |
 
+In a terminal, the command opens the Studio in your browser so you can watch every build,
+and keeps it running after the agent finishes so you can click through the result (Ctrl+C
+to stop; `--no-open` to skip the browser, `--exit` to quit when the agent is done). To look
+at a project again later: `node bin/imgui-studio.js serve --project my-menu --open`.
+
 The headless run uses `--strict-mcp-config` (only the Studio's MCP server),
 `--tools Read,Edit,Write,Glob,Grep` (no shell: every build goes through
 `build_start`), `--permission-mode acceptEdits`, and streams its progress; the
