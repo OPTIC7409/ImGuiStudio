@@ -46,17 +46,19 @@ function pythonOk(exe) {
   return !r.error && r.status === 0 && r.stdout.trim() === 'True';
 }
 
-function bundledPythonDir(dir) {
-  return path.join(dir, 'python', `${BUNDLED_PYTHON}_64bit`);
+// Kept outside emsdk/python/: emsdk installs its own copy there, and on Windows it cannot
+// overwrite the files of the Python that is running it.
+function bootstrapPythonDir(dir) {
+  return path.join(dir, 'bootstrap-python');
 }
 
-function bundledPython(dir) {
-  return path.join(bundledPythonDir(dir), WIN ? 'python.exe' : path.join('bin', 'python3'));
+function bootstrapPython(dir) {
+  return path.join(bootstrapPythonDir(dir), WIN ? 'python.exe' : path.join('bin', 'python3'));
 }
 
 function findBootstrapPython(dir) {
-  if (process.argv.includes('--bundled-python')) return pythonOk(bundledPython(dir)) ? bundledPython(dir) : null;
-  const candidates = [process.env.EMSDK_PYTHON, bundledPython(dir), 'python3.13', 'python3.12', 'python3.11', 'python3.10', '/opt/homebrew/bin/python3', '/usr/local/bin/python3', 'python3', 'python'];
+  if (process.argv.includes('--bundled-python')) return pythonOk(bootstrapPython(dir)) ? bootstrapPython(dir) : null;
+  const candidates = [process.env.EMSDK_PYTHON, bootstrapPython(dir), 'python3.13', 'python3.12', 'python3.11', 'python3.10', '/opt/homebrew/bin/python3', '/usr/local/bin/python3', 'python3', 'python'];
   return candidates.filter(Boolean).find(pythonOk) || null;
 }
 
@@ -78,11 +80,10 @@ async function downloadBundledPython(dir) {
   // The macOS archive has one top-level folder; the Windows one does not.
   const entries = fs.readdirSync(tmp);
   const root = entries.length === 1 && fs.statSync(path.join(tmp, entries[0])).isDirectory() ? path.join(tmp, entries[0]) : tmp;
-  fs.rmSync(bundledPythonDir(dir), { recursive: true, force: true });
-  fs.mkdirSync(path.dirname(bundledPythonDir(dir)), { recursive: true });
-  fs.renameSync(root, bundledPythonDir(dir));
+  fs.rmSync(bootstrapPythonDir(dir), { recursive: true, force: true });
+  fs.renameSync(root, bootstrapPythonDir(dir));
   fs.rmSync(tmp, { recursive: true, force: true });
-  return bundledPython(dir);
+  return bootstrapPython(dir);
 }
 
 async function installEmscripten() {
@@ -101,7 +102,7 @@ async function installEmscripten() {
   process.stdout.write(`using ${python}\n`);
   // Run emsdk.py directly (what the emsdk / emsdk.bat launchers do) with the Python found above.
   const env = { ...process.env, EMSDK_PYTHON: python };
-  if (python === bundledPython(dir)) {
+  if (python === bootstrapPython(dir)) {
     delete env.PYTHONHOME;
     delete env.PYTHONPATH;
   }
