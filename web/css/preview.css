@@ -38,42 +38,14 @@ body.pixelated #reference-overlay {
   pointer-events: none;
 }
 
-#overlay {
-  position: absolute;
-  inset: 0;
+/* Inspector overlay: drawn in screen space (crisp at any zoom) above the stage. */
+#inspect-layer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
-}
-
-.hl-box {
-  position: absolute;
-  box-sizing: border-box;
-  border: 1px solid #4da3ff;
-  background: rgba(77, 163, 255, 0.12);
-}
-
-.hl-box.selected {
-  border-color: #ffb547;
-  background: rgba(255, 181, 71, 0.12);
-}
-
-.hl-label {
-  position: absolute;
-  transform: translateY(-100%);
-  background: #1e6fd9;
-  color: #fff;
-  padding: 1px 5px;
-  border-radius: 3px 3px 0 0;
-  font: 11px/16px ui-monospace, SFMono-Regular, Menlo, monospace;
-  white-space: nowrap;
-}
-
-.hl-box.selected .hl-label {
-  background: #c7831b;
-}
-
-.hl-label.below {
-  transform: none;
-  border-radius: 0 0 3px 3px;
 }
 
 #status {

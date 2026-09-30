@@ -216,11 +216,20 @@ and the live preview can overlay the reference directly.
 
 ## Studio UI
 
-- **Left**: file tree and Monaco editor (Ctrl+S save, Ctrl+B build, error markers).
+- **Left**: file tree and Monaco editor (Ctrl+S save, Ctrl+B build, error markers). Lines
+  that create a widget in the preview get a gutter marker: click it to select the widget;
+  the widgets on the cursor's line are highlighted in the preview.
 - **Centre**: the live preview (the same WASM build, realtime), with viewport presets,
-  zoom, HiDPI, pause/step/slow-motion, inspect mode, 8 px grid, reference overlay;
-  and the Compare view.
-- **Right**: widget inspector (live list, details, source links, actions), references
+  zoom, HiDPI, pause/step/slow-motion, 8 px grid, reference overlay; and the Compare view.
+  **Interact / Inspect** (Ctrl/Cmd+Shift+C): in Inspect mode hovering shows each widget's
+  box, type, id and size plus its container; click selects, Shift+click or ↑/↓ walks out
+  to containers, double-click (or Enter) opens the code that creates it, and hovering
+  another widget measures the distance to the selection in pixels. In Interact mode, hold
+  Alt (⌥) to do the same without switching. **▦** outlines every widget, region and child
+  window.
+- **Right**: widget inspector (live list; for the selection: position and size, spacing
+  inside its container, a live editor for values bound with `STUDIO_BIND`, where it is
+  created in the code, actions), references
   and regions, visual build history (timeline, notes, diffs, compare, revert),
   captures, and the Agent activity log.
 - **Bottom**: problems (structured diagnostics), streamed build output, runtime

@@ -54,11 +54,15 @@
           <button class="icon" id="btn-step" title="Step one frame (while paused)">⇥</button>
           <select id="timescale" title="Time scale (slow motion)"><option value="1">1×</option><option value="0.5">½×</option><option value="0.25">¼×</option><option value="0.1">⅒×</option></select>
           <span class="divider"></span>
-          <button class="icon toggle-btn" id="btn-inspect" title="Inspect widgets (hover / click in the preview)">⌖</button>
+          <div class="seg mode-seg" id="mode-seg">
+            <button data-mode="interact" class="active" title="Interact: use the UI with the mouse and keyboard. Hold Alt to inspect and measure without switching.">Interact</button>
+            <button data-mode="inspect" title="Inspect: hover to see widgets, click to select (Ctrl/Cmd+Shift+C)">⌖ Inspect</button>
+          </div>
+          <button class="icon toggle-btn" id="btn-outlines" title="Outline every widget, region and child window">▦</button>
           <button class="icon toggle-btn" id="btn-grid" title="8px grid">#</button>
           <button class="icon toggle-btn" id="btn-overlay" title="Overlay the active reference on the live preview">◐</button>
-          <input type="range" id="overlay-opacity" min="0" max="1" step="0.05" value="0.5" title="Overlay opacity">
-          <select id="overlay-blend" title="Overlay mode"><option value="normal">Blend</option><option value="difference">Difference</option></select>
+          <input type="range" id="overlay-opacity" class="overlay-ctl" min="0" max="1" step="0.05" value="0.5" title="Overlay opacity">
+          <select id="overlay-blend" class="overlay-ctl" title="Overlay mode"><option value="normal">Blend</option><option value="difference">Difference</option></select>
           <span class="divider"></span>
           <button class="icon" id="btn-capture" title="Capture the visible preview">⎙</button>
           <button class="icon" id="btn-reload" title="Reload preview (reset state)">↻</button>
@@ -66,6 +70,7 @@
       </div>
       <div id="view-preview" class="view active">
         <iframe id="preview-frame" title="Dear ImGui preview"></iframe>
+        <div id="inspect-hint"></div>
         <div id="preview-stats"></div>
       </div>
       <div id="view-compare" class="view"></div>

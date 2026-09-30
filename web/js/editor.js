@@ -53,13 +53,17 @@ export async function initEditor(app) {
       minimap: { enabled: true, scale: 1, renderCharacters: false },
       scrollBeyondLastLine: false,
       renderWhitespace: 'selection',
+      glyphMargin: true,
       tabSize: 4,
       insertSpaces: true,
       model: null,
     });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => save(active));
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB, () => app.build());
-    editor.onDidChangeModelContent(() => renderTabs());
+    editor.onDidChangeModelContent(() => {
+      renderTabs();
+      scheduleLinks(400);
+    });
   } catch (e) {
     console.error(e);
     toast('Monaco editor failed to load; using a plain text editor.', 'err');
@@ -172,6 +176,7 @@ export async function initEditor(app) {
     }
     renderTabs();
     updateBanner();
+    scheduleLinks(0);
     app.bus.emit('active-file', path);
   }
 
@@ -271,6 +276,89 @@ export async function initEditor(app) {
   });
 
   app.openFile = open;
+
+  // Code <-> preview. Lines that create a widget visible in the preview get a gutter
+  // marker (a string literal matching the widget's label or id, or the line of its
+  // STUDIO_ macro). The widgets on the cursor's line are highlighted in the preview,
+  // and clicking a marker selects its widget.
+  let lineWidgets = new Map(); // line -> [widget]
+  let glyphIds = [];
+  let linkTimer = 0;
+  function scheduleLinks(ms = 250) {
+    clearTimeout(linkTimer);
+    linkTimer = setTimeout(refreshWidgetLinks, ms);
+  }
+  function literals(text) {
+    const out = [];
+    const re = /"((?:[^"\\\n]|\\.)*)"/g;
+    let m;
+    while ((m = re.exec(text))) out.push(m[1]);
+    return out;
+  }
+  function refreshWidgetLinks() {
+    if (!editor || !active) return;
+    const d = docs.get(active);
+    if (!d?.model || editor.getModel() !== d.model) return;
+    const byLabel = new Map();
+    const bySource = new Map();
+    const add = (map, key, w) => {
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(w);
+    };
+    for (const w of app.widgets?.widgets || []) {
+      if (!w.visible) continue;
+      for (const key of new Set([w.raw_label, w.label, w.anonymous ? null : w.id])) if (key && key.length > 1) add(byLabel, key, w);
+      for (const src of w.source || []) add(bySource, src, w);
+    }
+    lineWidgets = new Map();
+    const n = d.model.getLineCount();
+    for (let i = 1; i <= Math.min(n, 20000); i++) {
+      const text = d.model.getLineContent(i);
+      const found = new Set(bySource.get(`${active}:${i}`) || []);
+      if (text.includes('"')) for (const lit of literals(text)) for (const w of byLabel.get(lit) || []) found.add(w);
+      if (found.size) lineWidgets.set(i, [...found]);
+    }
+    const sel = app.selectedWidget;
+    glyphIds = editor.deltaDecorations(
+      glyphIds,
+      [...lineWidgets].map(([line, ws]) => ({
+        range: new monaco.Range(line, 1, line, 1),
+        options: {
+          glyphMarginClassName: `widget-glyph${ws.some((w) => w.id === sel) ? ' sel' : ''}`,
+          glyphMarginHoverMessage: {
+            value: `${ws
+              .slice(0, 6)
+              .map((w) => `\`${w.type}\` ${w.id}`)
+              .join('  \n')}${ws.length > 6 ? `  \n+${ws.length - 6} more` : ''}  \n_Click to select in the preview_`,
+          },
+        },
+      })),
+    );
+  }
+  if (editor) {
+    let cursorTimer = 0;
+    let linked = '';
+    editor.onDidChangeCursorPosition((e) => {
+      clearTimeout(cursorTimer);
+      cursorTimer = setTimeout(() => {
+        const ids = (lineWidgets.get(e.position.lineNumber) || []).slice(0, 40).map((w) => w.id);
+        if (ids.join(',') === linked) return;
+        linked = ids.join(',');
+        app.preview?.rpc('highlight', { ids }).catch(() => {});
+      }, 120);
+    });
+    editor.onMouseDown((e) => {
+      if (e.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) return;
+      const ws = lineWidgets.get(e.target.position.lineNumber);
+      if (!ws?.length) return;
+      // Clicking again cycles through the widgets on that line.
+      const next = ws[(ws.findIndex((w) => w.id === app.selectedWidget) + 1) % ws.length];
+      app.bus.emit('select-widget', next.id);
+      app.bus.emit('show-right', 'inspector');
+    });
+    app.bus.on('widgets', () => scheduleLinks(250));
+    app.bus.on('selection', () => scheduleLinks(0));
+  }
   showEmpty();
   const api = {
     open,

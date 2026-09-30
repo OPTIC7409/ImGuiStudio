@@ -19,7 +19,7 @@ const DT = 1 / 60;
 
 const canvas = document.getElementById('canvas');
 const stage = document.getElementById('stage');
-const overlay = document.getElementById('overlay');
+const layer = document.getElementById('inspect-layer');
 const statusEl = document.getElementById('status');
 const refImg = document.getElementById('reference-overlay');
 const guidesEl = document.getElementById('guides');
@@ -43,10 +43,14 @@ const state = {
   logs: [],
   zoom: 'fit',
   cssScale: 1,
-  inspect: false,
+  inspect: false, // inspect mode: the mouse picks widgets instead of driving the UI
+  peek: false, // Alt held in interact mode: inspect temporarily
+  outlines: false, // draw every widget's bounds
+  hoverPoint: null,
   hoverWidget: null,
   selected: null,
-  highlights: [],
+  highlights: [], // "linked" widgets: hovered in the inspector list or under the editor cursor
+  pick: null, // { x, y, stack, index } for click-again-to-select-the-container
   mouse: null,
   ws: null,
   cursor: -2,
@@ -312,7 +316,7 @@ function layoutStage() {
   const y = Math.max(0, Math.round((window.innerHeight - height * z) / 2));
   stage.style.transform = `translate(${x}px, ${y}px) scale(${z})`;
   document.body.classList.toggle('pixelated', z > 1.01);
-  renderHighlights();
+  requestOverlay();
 }
 
 window.addEventListener('resize', layoutStage);
@@ -367,7 +371,8 @@ function loop(ts) {
     state.fpsT0 = now;
     postParent({ type: 'event', name: 'stats', data: { fps: state.fps, frame: state.frames, time: round(state.time, 2), build: state.buildId, viewport: state.viewport } });
   }
-  if (state.inspect && state.hoverPoint) updateInspectHover();
+  if ((state.inspect || state.peek) && state.hoverPoint) updateInspectHover();
+  if (overlayWanted()) requestOverlay();
 }
 
 // Actions pause the realtime loop and advance time explicitly.
@@ -430,7 +435,7 @@ const input = {
 
 const CURSORS = ['default', 'text', 'move', 'ns-resize', 'ew-resize', 'nesw-resize', 'nwse-resize', 'pointer', 'wait', 'progress', 'not-allowed'];
 function updateCursor() {
-  if (state.inspect) {
+  if (state.inspect || state.peek) {
     canvas.style.cursor = 'crosshair';
     return;
   }
@@ -447,49 +452,57 @@ function canvasPoint(ev) {
 
 function installInput() {
   const mods = (e) => ({ ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, super: e.metaKey });
+  const picking = (e) => state.inspect || e.altKey;
+  let downForwarded = false;
   canvas.addEventListener('mousemove', (e) => {
     const [x, y] = canvasPoint(e);
-    if (state.inspect) {
+    const wasPeek = state.peek;
+    state.peek = !state.inspect && e.altKey;
+    if (picking(e)) {
       state.hoverPoint = [x, y];
       updateInspectHover();
       return;
     }
+    if (wasPeek) clearHover();
     if (state.ready) input.move(x, y);
   });
   canvas.addEventListener('mouseleave', () => {
     state.hoverPoint = null;
-    if (state.inspect) {
-      state.hoverWidget = null;
-      renderHighlights();
-      postParent({ type: 'event', name: 'inspect_hover', data: null });
-    } else if (state.ready) input.leave();
+    state.peek = false;
+    clearHover();
+    if (!state.inspect && state.ready) input.leave();
   });
   canvas.addEventListener('mousedown', (e) => {
     canvas.focus();
     if (!state.ready) return;
-    if (state.inspect) {
-      const [x, y] = canvasPoint(e);
-      const w = widgetAt(x, y);
-      state.selected = w ? w.id : null;
-      renderHighlights();
-      postParent({ type: 'event', name: 'inspect_select', data: w });
+    if (picking(e)) {
+      // The second press of a double-click belongs to the dblclick (open code).
+      if (e.detail < 2) pickAt(...canvasPoint(e), e.shiftKey);
       e.preventDefault();
       return;
     }
     input.mods(mods(e));
     input.button(e.button === 2 ? 1 : e.button === 1 ? 2 : 0, true);
+    downForwarded = true;
     e.preventDefault();
   });
   window.addEventListener('mouseup', (e) => {
-    if (!state.ready || state.inspect) return;
+    if (!state.ready || !downForwarded) return;
+    downForwarded = false;
     input.button(e.button === 2 ? 1 : e.button === 1 ? 2 : 0, false);
+  });
+  canvas.addEventListener('dblclick', (e) => {
+    if (!state.ready || !picking(e) || !state.selected) return;
+    openSelected();
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   canvas.addEventListener(
     'wheel',
     (e) => {
-      if (!state.ready || state.inspect) return;
+      if (!state.ready) return;
       const unit = e.deltaMode === 1 ? 3 : e.deltaMode === 2 ? 1 : 100;
+      // Scrolling works while inspecting: the UI needs the mouse position to know what to scroll.
+      if (picking(e)) input.move(...canvasPoint(e));
       input.wheel(-e.deltaX / unit, -e.deltaY / unit);
       e.preventDefault();
     },
@@ -497,6 +510,21 @@ function installInput() {
   );
   canvas.addEventListener('keydown', (e) => {
     if (!state.ready) return;
+    // Ctrl/Cmd+Shift+C toggles inspect mode (as in browser dev tools).
+    if (e.code === 'KeyC' && e.shiftKey && (e.ctrlKey || e.metaKey)) {
+      setInspect(!state.inspect);
+      postParent({ type: 'event', name: 'inspect_mode', data: { enabled: state.inspect } });
+      e.preventDefault();
+      return;
+    }
+    if (state.inspect) {
+      if (e.key === 'Escape') selectWidget(null);
+      else if (e.key === 'Enter') openSelected();
+      else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') stepSelection(e.key === 'ArrowUp' ? 1 : -1);
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'Alt') return;
     input.mods(mods(e));
     input.key(e.code, true);
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) input.chars(e.key);
@@ -504,9 +532,20 @@ function installInput() {
   });
   canvas.addEventListener('keyup', (e) => {
     if (!state.ready) return;
+    if (e.key === 'Alt' && state.peek) {
+      state.peek = false;
+      clearHover();
+    }
+    if (state.inspect) return;
     input.mods(mods(e));
     input.key(e.code, false);
     e.preventDefault();
+  });
+  window.addEventListener('blur', () => {
+    if (state.peek) {
+      state.peek = false;
+      clearHover();
+    }
   });
   canvas.addEventListener('focus', () => state.ready && state.M._studio_focus(1));
   canvas.addEventListener('blur', () => state.ready && state.M._studio_focus(0));
@@ -1203,20 +1242,24 @@ const methods = {
   },
 
   async set_inspect({ enabled }) {
-    state.inspect = !!enabled;
-    if (!state.inspect) {
-      state.hoverWidget = null;
-      renderHighlights();
-    }
-    canvas.style.cursor = state.inspect ? 'crosshair' : 'default';
-    state.cursor = -2;
+    setInspect(enabled);
     return { inspect: state.inspect };
   },
 
-  async highlight({ ids = [], selected = null }) {
-    state.highlights = ids;
-    if (selected !== undefined) state.selected = selected;
-    renderHighlights();
+  async set_outlines({ enabled }) {
+    state.outlines = !!enabled;
+    requestOverlay();
+    return { outlines: state.outlines };
+  },
+
+  // ids: widgets to show as linked (inspector list hover, editor cursor); selected: the selection.
+  async highlight({ ids, selected }) {
+    if (ids !== undefined) state.highlights = ids || [];
+    if (selected !== undefined) {
+      if (selected !== state.selected) state.pick = null;
+      state.selected = selected;
+    }
+    requestOverlay();
     return { ok: true };
   },
 
@@ -1261,7 +1304,7 @@ function compactWidget(w) {
 async function handleRpc(method, params) {
   const fn = methods[method];
   if (!fn) return { ok: false, error: { code: 'unknown_method', message: `Unknown runtime method: ${method}` } };
-  if (!['info', 'errors', 'set_zoom', 'set_overlay', 'set_guides', 'set_inspect', 'highlight', 'set_paused', 'set_time_scale'].includes(method)) {
+  if (!['info', 'errors', 'set_zoom', 'set_overlay', 'set_guides', 'set_inspect', 'set_outlines', 'highlight', 'set_paused', 'set_time_scale'].includes(method)) {
     if (!state.ready) {
       return {
         ok: false,
@@ -1283,59 +1326,439 @@ async function handleRpc(method, params) {
 
 // ---------------------------------------------------------------------------
 // Inspector overlay (visible preview)
+//
+// Drawn on a screen-space canvas above the stage, so lines and labels stay crisp at
+// any zoom. Hover (inspect mode, or Alt held in interact mode) shows the widget under
+// the mouse and its container; the selection persists while interacting; hovering
+// another widget while one is selected measures the distance between them.
 // ---------------------------------------------------------------------------
+
+const OVERLAY = {
+  hover: '#4da3ff',
+  hoverFill: 'rgba(77,163,255,0.12)',
+  hoverChip: '#1e6fd9',
+  select: '#ffb547',
+  selectFill: 'rgba(255,181,71,0.10)',
+  selectChip: '#c7831b',
+  linkedFill: 'rgba(77,163,255,0.07)',
+  container: 'rgba(176,186,206,0.8)',
+  measure: '#ff4d6d',
+  outline: 'rgba(120,200,255,0.32)',
+  outlineRegion: 'rgba(255,190,110,0.5)',
+  outlineWindow: 'rgba(190,150,255,0.45)',
+  font: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+};
+
+let snapCache = { key: null, snap: null };
+function overlaySnapshot() {
+  if (!state.ready || state.crashed || !state.M) return null;
+  const key = `${state.buildId}:${state.frames}`;
+  if (snapCache.key === key && snapCache.snap) return snapCache.snap;
+  try {
+    snapCache = { key, snap: snapshot() };
+  } catch {
+    return null;
+  }
+  return snapCache.snap;
+}
+
+function findWidget(snap, id) {
+  return id ? snap.widgets.find((w) => w.id === id) || null : null;
+}
+
+function setInspect(enabled) {
+  state.inspect = !!enabled;
+  if (!state.inspect) clearHover();
+  state.cursor = -2;
+  canvas.style.cursor = state.inspect ? 'crosshair' : 'default';
+  requestOverlay();
+}
+
+function clearHover(notify = true) {
+  const had = !!state.hoverWidget;
+  state.hoverWidget = null;
+  requestOverlay();
+  if (had && notify) postParent({ type: 'event', name: 'inspect_hover', data: null });
+}
 
 function updateInspectHover() {
   if (!state.hoverPoint) return;
-  const w = widgetAt(state.hoverPoint[0], state.hoverPoint[1]);
-  const id = w ? w.id : null;
-  if (id !== (state.hoverWidget && state.hoverWidget.id)) {
-    state.hoverWidget = w;
-    renderHighlights();
-    postParent({ type: 'event', name: 'inspect_hover', data: w });
-  }
+  const w = widgetAt(state.hoverPoint[0], state.hoverPoint[1], overlaySnapshot() || undefined);
+  const changed = (w && w.id) !== (state.hoverWidget && state.hoverWidget.id);
+  state.hoverWidget = w;
+  if (changed) postParent({ type: 'event', name: 'inspect_hover', data: w });
+  requestOverlay();
 }
 
-function renderHighlights() {
-  overlay.innerHTML = '';
-  if (!state.ready) return;
-  let snap;
-  try {
-    snap = snapshot();
-  } catch {
+const areaOf = (w) => boundsOf(w).width * boundsOf(w).height;
+const contains = (o, i) => o.x <= i.x && o.y <= i.y && o.x + o.width >= i.x + i.width && o.y + o.height >= i.y + i.height;
+
+// Everything under a point, innermost first: the widget, then its regions and child windows.
+function stackAt(x, y, snap) {
+  const top = widgetAt(x, y, snap);
+  const root = top ? top.window.split('/')[0] : null;
+  const inside = (b) => x >= b.x && y >= b.y && x < b.x + b.width && y < b.y + b.height;
+  const list = snap.widgets
+    .filter((w) => w.visible && inside(boundsOf(w)) && (!root || (w.window || '').split('/')[0] === root || w.id === root))
+    .sort((a, b) => areaOf(a) - areaOf(b) || (a.anonymous ? 1 : 0) - (b.anonymous ? 1 : 0));
+  const seen = new Set();
+  const out = [];
+  for (const w of list) {
+    const b = boundsOf(w);
+    const k = `${b.x},${b.y},${b.width},${b.height}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(w);
+  }
+  if (top) {
+    const i = out.findIndex((w) => w.id === top.id);
+    if (i !== 0) {
+      if (i > 0) out.splice(i, 1);
+      out.unshift(top);
+    }
+  }
+  return out;
+}
+
+// Click selects the innermost widget under the mouse. Shift+click selects its
+// container, and each further Shift+click at that spot walks one level further out.
+function pickAt(x, y, outward = false) {
+  const snap = overlaySnapshot();
+  if (!snap) return;
+  const p = state.pick;
+  if (outward && p && Math.abs(p.x - x) < 4 && Math.abs(p.y - y) < 4 && p.stack.length > 1 && state.selected === p.stack[p.index].id) {
+    p.index = Math.min(p.stack.length - 1, p.index + 1);
+    selectWidget(p.stack[p.index]);
     return;
   }
-  const ids = new Set(state.highlights || []);
-  if (state.hoverWidget) ids.add(state.hoverWidget.id);
-  const inv = 1 / (state.cssScale || 1);
-  for (const id of ids) {
-    const w = snap.widgets.find((x) => x.id === id) || snap.windows.find((x) => x.id === id);
-    if (!w) continue;
-    addBox(w, id === state.selected, inv);
-  }
-  if (state.selected && !ids.has(state.selected)) {
-    const w = snap.widgets.find((x) => x.id === state.selected);
-    if (w) addBox(w, true, inv);
-  }
+  const stack = stackAt(x, y, snap);
+  const index = outward && stack.length > 1 ? 1 : 0;
+  state.pick = { x, y, stack, index };
+  selectWidget(stack[index] || null);
 }
 
-function addBox(w, selected, inv) {
-  const b = w.bounds;
-  const box = document.createElement('div');
-  box.className = `hl-box${selected ? ' selected' : ''}`;
-  box.style.left = `${b.x}px`;
-  box.style.top = `${b.y}px`;
-  box.style.width = `${Math.max(1, b.width)}px`;
-  box.style.height = `${Math.max(1, b.height)}px`;
-  box.style.borderWidth = `${inv}px`;
-  const label = document.createElement('div');
-  label.className = `hl-label${b.y < 20 ? ' below' : ''}`;
-  if (b.y < 20) label.style.top = `${b.height}px`;
-  label.style.fontSize = `${11 * inv}px`;
-  label.style.lineHeight = `${16 * inv}px`;
-  label.textContent = `${w.id}  ${Math.round(b.width)}×${Math.round(b.height)}`;
-  box.appendChild(label);
-  overlay.appendChild(box);
+function selectWidget(w) {
+  state.selected = w ? w.id : null;
+  if (!w) state.pick = null;
+  requestOverlay();
+  postParent({ type: 'event', name: 'inspect_select', data: w });
+}
+
+// ArrowUp: select the container; ArrowDown: back towards the innermost widget.
+function stepSelection(dir) {
+  const snap = overlaySnapshot();
+  const sel = snap && findWidget(snap, state.selected);
+  if (!sel) return;
+  let p = state.pick;
+  if (!p || p.stack[p.index]?.id !== sel.id) {
+    const b = boundsOf(sel);
+    const stack = stackAt(b.x + b.width / 2, b.y + b.height / 2, snap);
+    const i = stack.findIndex((w) => w.id === sel.id);
+    p = state.pick = { x: -1, y: -1, stack: i >= 0 ? stack : [sel, ...stack], index: Math.max(0, i) };
+  }
+  p.index = Math.max(0, Math.min(p.stack.length - 1, p.index + dir));
+  selectWidget(p.stack[p.index]);
+}
+
+function openSelected() {
+  const snap = overlaySnapshot();
+  const w = snap && findWidget(snap, state.selected);
+  if (w) postParent({ type: 'event', name: 'inspect_open', data: w });
+}
+
+// Smallest region or child window that contains the widget.
+function containerOf(snap, w) {
+  const b = boundsOf(w);
+  let best = null;
+  for (const c of snap.widgets) {
+    if (c.id === w.id || !c.visible || (c.type !== 'region' && c.type !== 'window')) continue;
+    const cb = boundsOf(c);
+    if (!contains(cb, b) || areaOf(c) <= b.width * b.height) continue;
+    if (!best || areaOf(c) < areaOf(best)) best = c;
+  }
+  return best;
+}
+
+function overlayWanted() {
+  return state.outlines || !!state.selected || !!state.hoverWidget || state.highlights.length > 0;
+}
+
+let overlayQueued = false;
+function requestOverlay() {
+  if (overlayQueued || ROLE !== 'studio') return;
+  overlayQueued = true;
+  requestAnimationFrame(() => {
+    overlayQueued = false;
+    drawOverlay();
+  });
+}
+
+function drawOverlay() {
+  const dpr = window.devicePixelRatio || 1;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  if (layer.width !== Math.round(vw * dpr) || layer.height !== Math.round(vh * dpr)) {
+    layer.width = Math.round(vw * dpr);
+    layer.height = Math.round(vh * dpr);
+  }
+  const ctx = layer.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, vw, vh);
+  if (!overlayWanted()) return;
+  const snap = overlaySnapshot();
+  if (!snap) return;
+  const r = canvas.getBoundingClientRect();
+  const s = r.width / state.viewport.width;
+  const g = {
+    ctx,
+    dpr,
+    vw,
+    vh,
+    scr: (b) => ({ x: r.left + b.x * s, y: r.top + b.y * s, w: b.width * s, h: b.height * s }),
+    pt: (x, y) => [r.left + x * s, r.top + y * s],
+  };
+  if (state.outlines) drawOutlines(g, snap);
+  const sel = findWidget(snap, state.selected);
+  const hov = state.hoverWidget ? findWidget(snap, state.hoverWidget.id) || state.hoverWidget : null;
+  for (const id of state.highlights) {
+    const w = findWidget(snap, id);
+    if (w && w.visible && id !== state.selected && (!hov || id !== hov.id)) drawBox(g, w, 'linked');
+  }
+  if (hov) {
+    const c = containerOf(snap, hov);
+    if (c && (!sel || c.id !== sel.id)) drawContainer(g, c);
+  }
+  if (sel && sel.visible) drawBox(g, sel, 'selected');
+  if (hov && (!sel || hov.id !== sel.id)) drawBox(g, hov, 'hover');
+  if (sel && sel.visible && hov && sel.id !== hov.id) drawMeasure(g, boundsOf(sel), boundsOf(hov));
+}
+
+const fmtPx = (v) => (Math.abs(v - Math.round(v)) < 0.05 ? String(Math.round(v)) : v.toFixed(1));
+const snapPx = (g, v) => Math.round(v * g.dpr) / g.dpr;
+
+// Stroke inside the rectangle, aligned to device pixels.
+function strokeBox(g, q, lw) {
+  const x = snapPx(g, q.x);
+  const y = snapPx(g, q.y);
+  const w = snapPx(g, q.x + q.w) - x;
+  const h = snapPx(g, q.y + q.h) - y;
+  g.ctx.lineWidth = lw;
+  g.ctx.strokeRect(x + lw / 2, y + lw / 2, Math.max(0, w - lw), Math.max(0, h - lw));
+}
+
+function prettyName(w) {
+  if (w.type !== 'window') return w.id;
+  const last = String(w.label || w.id).split('/').pop();
+  return last.replace(/^#+/, '').replace(/_[0-9A-F]{8}$/, '') || w.id;
+}
+
+// A label chip: [type] id  W×H, above the box (below when there is no room).
+function chip(g, q, parts, bg, below = false) {
+  const { ctx } = g;
+  ctx.font = `600 11px ${OVERLAY.font}`;
+  const pad = 5;
+  const widths = parts.map((p) => {
+    ctx.font = `${p.bold ? 600 : 400} 11px ${OVERLAY.font}`;
+    return ctx.measureText(p.text).width;
+  });
+  const gap = 6;
+  const w = widths.reduce((a, b) => a + b, 0) + gap * (parts.length - 1) + pad * 2;
+  const h = 17;
+  const x = Math.min(Math.max(2, q.x), g.vw - w - 2);
+  const above = q.y - h - 2;
+  const under = q.y + q.h + 2;
+  let y = below ? (under + h <= g.vh - 2 ? under : above) : above >= 2 ? above : under;
+  if (y < 2 || y + h > g.vh - 2) y = Math.max(2, Math.min(g.vh - h - 2, q.y + 2));
+  ctx.fillStyle = bg;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, w, h, 3);
+  else ctx.rect(x, y, w, h);
+  ctx.fill();
+  let cx = x + pad;
+  parts.forEach((p, i) => {
+    ctx.font = `${p.bold ? 600 : 400} 11px ${OVERLAY.font}`;
+    ctx.fillStyle = p.color || '#fff';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(p.text, cx, y + h / 2 + 0.5);
+    cx += widths[i] + gap;
+  });
+}
+
+function drawBox(g, w, kind) {
+  const { ctx } = g;
+  const b = boundsOf(w);
+  const q = g.scr(b);
+  ctx.save();
+  // Tint small boxes only: a tinted window or panel would hide the colours being judged.
+  if (q.w * q.h < 0.15 * g.vw * g.vh) {
+    ctx.fillStyle = kind === 'selected' ? OVERLAY.selectFill : kind === 'hover' ? OVERLAY.hoverFill : OVERLAY.linkedFill;
+    ctx.fillRect(q.x, q.y, q.w, q.h);
+  }
+  ctx.strokeStyle = kind === 'selected' ? OVERLAY.select : OVERLAY.hover;
+  if (kind === 'linked') ctx.setLineDash([4, 3]);
+  strokeBox(g, q, kind === 'selected' ? 2 : 1);
+  ctx.setLineDash([]);
+  if (kind === 'selected') {
+    ctx.fillStyle = OVERLAY.select;
+    ctx.strokeStyle = '#0b0c10';
+    ctx.lineWidth = 1;
+    for (const [hx, hy] of [[q.x, q.y], [q.x + q.w, q.y], [q.x, q.y + q.h], [q.x + q.w, q.y + q.h]]) {
+      ctx.fillRect(snapPx(g, hx) - 3, snapPx(g, hy) - 3, 6, 6);
+      ctx.strokeRect(snapPx(g, hx) - 3.5, snapPx(g, hy) - 3.5, 7, 7);
+    }
+  }
+  if (kind !== 'linked' || q.w > 40) {
+    const light = kind === 'selected' ? '#2a1c05' : '#dbe9ff';
+    chip(
+      g,
+      q,
+      [
+        { text: w.type || 'item', bold: true, color: kind === 'selected' ? '#1b1203' : '#fff' },
+        { text: prettyName(w), color: kind === 'selected' ? '#1b1203' : '#fff' },
+        { text: `${fmtPx(b.width)}×${fmtPx(b.height)}`, color: light },
+      ],
+      kind === 'selected' ? OVERLAY.select : OVERLAY.hoverChip,
+      kind === 'selected',
+    );
+  }
+  ctx.restore();
+}
+
+function drawContainer(g, c) {
+  const { ctx } = g;
+  const q = g.scr(boundsOf(c));
+  ctx.save();
+  ctx.strokeStyle = OVERLAY.container;
+  ctx.setLineDash([3, 3]);
+  strokeBox(g, q, 1);
+  ctx.setLineDash([]);
+  ctx.font = `10px ${OVERLAY.font}`;
+  const text = `${c.type === 'window' ? 'window' : c.type} ${prettyName(c)}`;
+  const tw = ctx.measureText(text).width + 8;
+  // A tab above the container's top-left corner (inside it when there is no room).
+  const ty = q.y - 15 >= 2 ? q.y - 15 : q.y + 1;
+  ctx.fillStyle = 'rgba(11,12,16,0.88)';
+  ctx.fillRect(q.x, ty, tw, 14);
+  ctx.fillStyle = OVERLAY.container;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, q.x + 4, ty + 7.5);
+  ctx.restore();
+}
+
+function drawOutlines(g, snap) {
+  const { ctx } = g;
+  ctx.save();
+  for (const w of snap.widgets) {
+    if (!w.visible) continue;
+    const q = g.scr(boundsOf(w));
+    if (w.type === 'region') {
+      ctx.strokeStyle = OVERLAY.outlineRegion;
+      ctx.setLineDash([3, 3]);
+    } else if (w.type === 'window') {
+      ctx.strokeStyle = OVERLAY.outlineWindow;
+      ctx.setLineDash([6, 3]);
+    } else {
+      ctx.strokeStyle = OVERLAY.outline;
+      ctx.setLineDash([]);
+    }
+    strokeBox(g, q, 1);
+  }
+  ctx.restore();
+}
+
+// Distances between the selection (a) and the hovered widget (b), in design pixels:
+// gaps when they are apart, insets when one contains the other.
+function drawMeasure(g, a, b) {
+  const segs = [];
+  const guides = [];
+  const aR = a.x + a.width;
+  const aB = a.y + a.height;
+  const bR = b.x + b.width;
+  const bB = b.y + b.height;
+  if (contains(b, a) || contains(a, b)) {
+    const [o, i] = contains(b, a) ? [b, a] : [a, b];
+    const cy = i.y + i.height / 2;
+    const cx = i.x + i.width / 2;
+    segs.push([o.x, cy, i.x, cy], [i.x + i.width, cy, o.x + o.width, cy], [cx, o.y, cx, i.y], [cx, i.y + i.height, cx, o.y + o.height]);
+  } else {
+    const oy1 = Math.max(a.y, b.y);
+    const oy2 = Math.min(aB, bB);
+    const yMid = oy2 > oy1 ? (oy1 + oy2) / 2 : a.y + a.height / 2;
+    const ox1 = Math.max(a.x, b.x);
+    const ox2 = Math.min(aR, bR);
+    const xMid = ox2 > ox1 ? (ox1 + ox2) / 2 : a.x + a.width / 2;
+    const toB = (x, y, vertical) => {
+      // Dashed guide from the end of a measurement to b when they do not overlap on that axis.
+      if (vertical && (y < b.y || y > bB)) guides.push([x, y, x, y < b.y ? b.y : bB]);
+      if (!vertical && (x < b.x || x > bR)) guides.push([x, y, x < b.x ? b.x : bR, y]);
+    };
+    if (b.x >= aR) {
+      segs.push([aR, yMid, b.x, yMid]);
+      toB(b.x, yMid, true);
+    } else if (a.x >= bR) {
+      segs.push([bR, yMid, a.x, yMid]);
+      toB(bR, yMid, true);
+    }
+    if (b.y >= aB) {
+      segs.push([xMid, aB, xMid, b.y]);
+      toB(xMid, b.y, false);
+    } else if (a.y >= bB) {
+      segs.push([xMid, bB, xMid, a.y]);
+      toB(xMid, bB, false);
+    }
+  }
+  const { ctx } = g;
+  ctx.save();
+  ctx.strokeStyle = OVERLAY.measure;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  for (const [x1, y1, x2, y2] of guides) {
+    const [p1x, p1y] = g.pt(x1, y1);
+    const [p2x, p2y] = g.pt(x2, y2);
+    ctx.beginPath();
+    ctx.moveTo(snapPx(g, p1x) + 0.5 / g.dpr, snapPx(g, p1y) + 0.5 / g.dpr);
+    ctx.lineTo(snapPx(g, p2x) + 0.5 / g.dpr, snapPx(g, p2y) + 0.5 / g.dpr);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  for (const [x1, y1, x2, y2] of segs) {
+    const len = Math.abs(x2 - x1) + Math.abs(y2 - y1);
+    if (len < 0.5) continue;
+    const [p1x, p1y] = g.pt(x1, y1);
+    const [p2x, p2y] = g.pt(x2, y2);
+    const horizontal = y1 === y2;
+    const o = 0.5 / g.dpr;
+    ctx.beginPath();
+    ctx.moveTo(snapPx(g, p1x) + o, snapPx(g, p1y) + o);
+    ctx.lineTo(snapPx(g, p2x) + o, snapPx(g, p2y) + o);
+    // End ticks
+    for (const [px, py] of [[p1x, p1y], [p2x, p2y]]) {
+      if (horizontal) {
+        ctx.moveTo(snapPx(g, px) + o, py - 4);
+        ctx.lineTo(snapPx(g, px) + o, py + 4);
+      } else {
+        ctx.moveTo(px - 4, snapPx(g, py) + o);
+        ctx.lineTo(px + 4, snapPx(g, py) + o);
+      }
+    }
+    ctx.stroke();
+    const text = fmtPx(len);
+    ctx.font = `600 10px ${OVERLAY.font}`;
+    const tw = ctx.measureText(text).width + 8;
+    const mx = (p1x + p2x) / 2;
+    const my = (p1y + p2y) / 2;
+    const lx = horizontal ? mx - tw / 2 : mx + 5;
+    const ly = horizontal ? my + 5 : my - 7;
+    ctx.fillStyle = OVERLAY.measure;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(lx, ly, tw, 14, 3);
+    else ctx.rect(lx, ly, tw, 14);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, lx + 4, ly + 7.5);
+  }
+  ctx.restore();
 }
 
 window.__studio = { state, methods, handleRpc };

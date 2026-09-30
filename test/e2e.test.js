@@ -12,6 +12,7 @@ import { Studio } from '../server/studio.js';
 import { startHttpServer } from '../server/http.js';
 import { runOp } from '../server/ops.js';
 import { decodeImage } from '../server/images.js';
+import { findBrowser } from '../server/headless.js';
 
 const toolchain = findToolchain();
 let browserOk = true;
@@ -94,6 +95,72 @@ describe('minimal project end-to-end', { skip: SKIP, timeout: 600000 }, () => {
     await ctx.op('ui_click_widget', { id: r.widgets[0].id });
     r = await ctx.op('ui_inspect_widget', { id: 'graphics.quality' });
     assert.equal(r.widget.state.value, 2);
+  });
+
+  it('inspects the visible preview: hover, select, container, Alt-peek, overlay', async () => {
+    const { chromium } = await import('playwright-core');
+    const executablePath = findBrowser();
+    const browser = await chromium.launch({ ...(executablePath ? { executablePath } : {}), args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1100, height: 700 } });
+      await page.goto(`http://127.0.0.1:${ctx.port}/preview.html?role=studio`);
+      await page.waitForFunction(() => window.__studio?.state?.ready, null, { timeout: 30000 });
+      const rpc = (method, params) => page.evaluate(([m, p]) => window.__studio.handleRpc(m, p), [method, params]);
+      const center = async (id) => {
+        const r = (await rpc('inspect', { id })).result.widget;
+        const c = await page.evaluate(() => {
+          const b = document.getElementById('canvas').getBoundingClientRect();
+          return { x: b.left, y: b.top, k: b.width / window.__studio.state.viewport.width };
+        });
+        const b = r.visible_bounds || r.bounds;
+        return [c.x + (b.x + b.width / 2) * c.k, c.y + (b.y + b.height / 2) * c.k];
+      };
+      const st = () => page.evaluate(() => ({ hover: window.__studio.state.hoverWidget?.id ?? null, selected: window.__studio.state.selected }));
+      const inkNear = ([x, y]) =>
+        page.evaluate(([x, y]) => {
+          const l = document.getElementById('inspect-layer');
+          const d = window.devicePixelRatio || 1;
+          const px = l.getContext('2d').getImageData(Math.round((x - 60) * d), Math.round((y - 30) * d), Math.round(120 * d), Math.round(60 * d)).data;
+          let n = 0;
+          for (let i = 3; i < px.length; i += 4) if (px[i] > 0) n++;
+          return n;
+        }, [x, y]);
+
+      const vsync = await center('graphics.vsync');
+      const before = (await rpc('inspect', { id: 'graphics.vsync' })).result.widget.state.value;
+      await rpc('set_inspect', { enabled: true });
+      await page.mouse.move(...vsync);
+      await page.waitForTimeout(150);
+      assert.equal((await st()).hover, 'graphics.vsync');
+      assert.ok((await inkNear(vsync)) > 50, 'hover box is drawn');
+      await page.mouse.click(...vsync);
+      assert.equal((await st()).selected, 'graphics.vsync');
+      assert.equal((await rpc('inspect', { id: 'graphics.vsync' })).result.widget.state.value, before, 'inspect clicks do not press widgets');
+      await page.keyboard.down('Shift');
+      await page.mouse.click(...vsync);
+      await page.keyboard.up('Shift');
+      assert.notEqual((await st()).selected, 'graphics.vsync', 'Shift+click selects the container');
+
+      // Interact mode: Alt-hover inspects without switching; releasing Alt ends it.
+      await rpc('set_inspect', { enabled: false });
+      await rpc('highlight', { selected: null });
+      const apply = await center('graphics.apply');
+      await page.keyboard.down('Alt');
+      await page.mouse.move(...apply, { steps: 3 });
+      await page.waitForTimeout(150);
+      assert.equal((await st()).hover, 'graphics.apply');
+      await page.keyboard.up('Alt');
+      await page.mouse.move(apply[0] + 1, apply[1]);
+      await page.waitForTimeout(150);
+      assert.equal((await st()).hover, null);
+
+      await rpc('set_outlines', { enabled: true });
+      await page.mouse.move(2, 2);
+      await page.waitForTimeout(150);
+      assert.ok((await inkNear(apply)) > 20, 'outlines are drawn');
+    } finally {
+      await browser.close();
+    }
   });
 
   it('reports unknown widgets with candidates', async () => {

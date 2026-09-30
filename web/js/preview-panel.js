@@ -1,6 +1,6 @@
 // The visible live preview (an iframe running the same preview runtime as the agent,
 // in realtime mode) and its toolbar.
-import { h, toast } from './ui.js';
+import { h, clear, toast } from './ui.js';
 
 export function initPreview(app) {
   const frame = document.getElementById('preview-frame');
@@ -8,7 +8,7 @@ export function initPreview(app) {
   const pending = new Map();
   let nextId = 1;
   let ready = false;
-  const settings = { zoom: 'fit', dpr: 1, paused: false, timeScale: 1, inspect: false, grid: false, overlay: false, opacity: 0.5, blend: 'normal', viewport: null };
+  const settings = { zoom: 'fit', dpr: 1, paused: false, timeScale: 1, inspect: false, outlines: false, grid: false, overlay: false, opacity: 0.5, blend: 'normal', viewport: null };
 
   function rpc(method, params = {}, timeout = 30000) {
     return new Promise((resolve, reject) => {
@@ -45,6 +45,10 @@ export function initPreview(app) {
       } else if (msg.name === 'inspect_select') {
         app.bus.emit('widget-selected', msg.data);
         if (msg.data) app.bus.emit('show-right', 'inspector');
+      } else if (msg.name === 'inspect_open') {
+        app.bus.emit('widget-open', msg.data);
+      } else if (msg.name === 'inspect_mode') {
+        setMode(msg.data.enabled ? 'inspect' : 'interact');
       } else if (msg.name === 'no_build') {
         stats.textContent = 'no build yet';
       }
@@ -67,6 +71,7 @@ export function initPreview(app) {
       await rpc('set_paused', { paused: settings.paused });
       await rpc('set_time_scale', { scale: settings.timeScale });
       await rpc('set_inspect', { enabled: settings.inspect });
+      await rpc('set_outlines', { enabled: settings.outlines });
       await rpc('set_guides', { grid: settings.grid ? 8 : 0 });
       await applyOverlay();
     } catch (e) {
@@ -145,7 +150,37 @@ export function initPreview(app) {
     };
     return b;
   };
-  toggle('btn-inspect', 'inspect', () => rpc('set_inspect', { enabled: settings.inspect }));
+  // Interact: the mouse drives the UI (hold Alt to inspect). Inspect: the mouse picks widgets.
+  const modeSeg = document.getElementById('mode-seg');
+  const hint = document.getElementById('inspect-hint');
+  const ALT = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌥' : 'Alt';
+  const kbd = (k) => h('kbd', {}, k);
+  function renderHint() {
+    clear(hint);
+    hint.classList.toggle('on', settings.inspect);
+    if (settings.inspect) {
+      hint.append('Click selects · ', kbd('Shift'), '+click container · ', kbd('↑'), kbd('↓'), ' walk · double-click opens code · hover to measure · ', kbd('Esc'), ' clear');
+    } else {
+      hint.append('Hold ', kbd(ALT), ' to inspect and measure · ', kbd(ALT), '+click selects · ', kbd(/⌥/.test(ALT) ? '⌘⇧C' : 'Ctrl+Shift+C'), ' inspect mode');
+    }
+  }
+  function setMode(mode) {
+    settings.inspect = mode === 'inspect';
+    for (const b of modeSeg.querySelectorAll('button')) b.classList.toggle('active', b.dataset.mode === mode);
+    renderHint();
+    rpc('set_inspect', { enabled: settings.inspect }).catch(() => {});
+  }
+  for (const b of modeSeg.querySelectorAll('button')) b.onclick = () => setMode(b.dataset.mode);
+  renderHint();
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyC' && e.shiftKey && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      setMode(settings.inspect ? 'interact' : 'inspect');
+    } else if (e.key === 'Escape' && !e.target.closest?.('input, textarea, select, .monaco-editor, .modal')) {
+      app.bus.emit('select-widget', null);
+    }
+  });
+  toggle('btn-outlines', 'outlines', () => rpc('set_outlines', { enabled: settings.outlines }));
   toggle('btn-grid', 'grid', () => rpc('set_guides', { grid: settings.grid ? 8 : 0 }));
   const overlayBtn = toggle('btn-overlay', 'overlay', async () => {
     if (settings.overlay && !app.state?.references?.active) {
@@ -153,6 +188,8 @@ export function initPreview(app) {
       settings.overlay = false;
       overlayBtn.classList.remove('on');
     }
+    // Opacity and blend controls only matter while the overlay is shown.
+    for (const el of document.querySelectorAll('.overlay-ctl')) el.classList.toggle('on', settings.overlay);
     return applyOverlay();
   });
   const op = document.getElementById('overlay-opacity');
@@ -185,6 +222,28 @@ export function initPreview(app) {
   // The preview page reloads itself on new builds (server push); nothing to do here
   // except tracking the build for display.
   app.bus.on('server:preview_reload', (d) => (app.previewBuild = d.build));
+
+  // One widget snapshot for the inspector and the editor, refreshed twice a second.
+  app.widgets = null;
+  let widgetsKey = '';
+  async function pollWidgets() {
+    if (!ready || document.hidden) return;
+    try {
+      const r = await rpc('widgets', { include_hidden: true, include_anonymous: true, include_windows: true, compact: false, limit: 5000 });
+      const key = JSON.stringify(r.widgets);
+      if (key === widgetsKey) return;
+      widgetsKey = key;
+      app.widgets = r;
+      app.bus.emit('widgets', r);
+    } catch {
+      // preview reloading
+    }
+  }
+  setInterval(pollWidgets, 500);
+  app.bus.on('preview-ready', () => {
+    widgetsKey = '';
+    pollWidgets();
+  });
 
   reload();
   return {
