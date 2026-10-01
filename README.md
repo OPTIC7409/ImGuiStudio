@@ -2,6 +2,8 @@
 
 **A visual feedback loop for AI agents building real Dear ImGui interfaces in C++.**
 
+Created and maintained by **[OPTIC7409](https://github.com/OPTIC7409)**.
+
 Agents are good at writing Dear ImGui code but blind to what it looks like, so
 they settle for "default ImGui with new colours". ImGui Studio compiles the
 actual C++ to WebAssembly, renders it through WebGL2, and gives the agent eyes
@@ -37,12 +39,13 @@ for the headless agent preview (Chrome, Chromium or Edge are used when installed
 builds both example projects once, so the first start is fast.
 
 ```sh
-git clone -b claude/brave-mccarthy-60wtxw https://github.com/OPTIC7409/ImGuiStudio.git
+git clone https://github.com/OPTIC7409/ImGuiStudio.git
 cd ImGuiStudio
 npm install
 npm run setup          # Emscripten + browser if missing, then first builds
 npm start              # Studio with the showcase project   -> http://localhost:7420
 npm run resonance      # Studio with the agent-built menu   -> http://localhost:7421
+npm run horizon        # Studio with the game settings menu -> http://localhost:7423
 ```
 
 `npm start` copies the showcase template into `./workspace` (git-ignored) the first
@@ -74,7 +77,12 @@ real render and iterate, while you watch the Studio at http://localhost:7420.
 - [`examples/resonance`](examples/resonance): the settings window the design agent built on its own
   from a short brief (84 turns, 9 builds, about 12 minutes). Five pages: General, Audio,
   MIDI, Appearance, Shortcuts.
+- [`examples/horizon`](examples/horizon): "Horizon", a game settings menu (Graphics, Audio,
+  Controls, Gameplay, Profiles) built on a reusable `theme/` + `widgets/` layer. A good
+  starting point to copy for your own menu.
 - [`templates/showcase`](templates/showcase): "Nova", a hand-written custom settings UI.
+
+![Horizon example](docs/images/horizon.png)
 
 ## The ImGui Menu Designer agent
 
@@ -229,11 +237,17 @@ and the live preview can overlay the reference directly.
   window.
 - **Right**: widget inspector (live list; for the selection: position and size, spacing
   inside its container, a live editor for values bound with `STUDIO_BIND`, where it is
-  created in the code, actions), references
+  created in the code, actions), the **Colors** panel, references
   and regions, visual build history (timeline, notes, diffs, compare, revert),
   captures, and the Agent activity log.
 - **Bottom**: problems (structured diagnostics), streamed build output, runtime
   errors and logs (assertions with file:line, Dear ImGui error recovery messages).
+- **Colors** (Figma-style): every colour literal in your sources (`Hex(0xRRGGBB)`,
+  `ImVec4`, `ImColor`, `IM_COL32`), named by what it is assigned to (`C.bg_root`,
+  `ImGuiCol_Text`, `kAccents[2]`). *Theme colors* edits one token; *All colors* groups
+  identical colours so one edit recolours every use. The picker (saturation/value field,
+  hue, opacity, hex, project swatches) rewrites the literal in its original notation and
+  rebuilds, so the C++ stays the source of truth.
 - "Agent drives preview" routes agent commands to your visible preview instead of
   the headless one, so you can watch every click.
 
@@ -245,9 +259,104 @@ and a `CMakeLists.txt` (uses system GLFW, or fetches it). `export_check`
 compiles every source with the host compiler without `IMGUI_STUDIO` to prove
 there is no Studio dependency.
 
+To put the menu in an existing application, use the export's `embed/` folder:
+
+- your `.cpp`/`.h` files flattened into one folder, with project `#include`s rewritten
+  so no include paths are needed (a `main.cpp` becomes `src_main.cpp`)
+- the `assets/` files compiled into `studio_assets.cpp`, with font/file loads routed
+  through `StudioAssets`, so fonts load whatever the host's working directory is
+- `studio.h` / `studio_app.h`, and a `CMakeLists.txt` that builds a `<name>_ui`
+  static library against your `imgui` target
+
+Add `embed/*.cpp` to any build that has `imgui.h` on the include path (or
+`add_subdirectory(embed)`), then call `AppInit()` once and `AppFrame()` each frame.
+The standalone build links the same `embed/` library.
+
 ```sh
 cd export/my-menu-build12 && cmake -S . -B build && cmake --build build
 ```
+
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph Clients
+        UI["Studio UI<br/>(browser: editor, preview,<br/>inspector, Colors, history)"]
+        AG["AI agent<br/>(Claude Code / Cursor)"]
+        CLI["CLI<br/>bin/imgui-studio.js"]
+    end
+
+    subgraph Server["Node server (server/)"]
+        OPS["ops.js<br/>operation registry<br/>(JSON schema + handler)"]
+        HTTP["http.js<br/>HTTP + WebSocket API"]
+        MCP["mcp.js<br/>MCP over stdio"]
+        ST["studio.js<br/>project state, file watcher"]
+        BLD["builder.js<br/>incremental Emscripten build"]
+        HIST["history.js<br/>build snapshots, diff, revert"]
+        CMP["compare.js / images.js<br/>reference comparison"]
+        CLR["colors.js<br/>colour scan + rewrite"]
+        EXP["exporter.js / embed.js<br/>native export"]
+        HUB["runtime-hub.js<br/>RPC to previews"]
+        HL["headless.js<br/>headless Chromium"]
+    end
+
+    subgraph Project["Your project (the source of truth)"]
+        SRC["C++ sources<br/>AppInit() / AppFrame()<br/>+ studio.h macros"]
+        ASSETS["assets/ (fonts, images)"]
+    end
+
+    subgraph Runtime["Preview runtime (WebAssembly)"]
+        WASM["your UI + Dear ImGui<br/>compiled by emcc"]
+        HOST["studio_host_web.cpp<br/>WebGL2 host, frame stepping,<br/>input injection, readback"]
+        REG["studio_runtime.cpp<br/>widget registry<br/>(test-engine hooks)"]
+    end
+
+    OUT["export/your-menu/<br/>CMake + GLFW app<br/>+ embed/ drop-in sources"]
+
+    UI -->|"POST /api/op/*, WS events"| HTTP
+    AG -->|"MCP tools"| MCP
+    CLI --> OPS
+    HTTP --> OPS
+    MCP --> OPS
+    OPS --> ST
+    OPS --> CLR
+    OPS --> CMP
+    OPS --> EXP
+    ST --> BLD
+    ST --> HIST
+    CLR -->|"edits literals"| SRC
+    AG -->|"edits"| SRC
+    BLD -->|"reads"| SRC
+    BLD --> WASM
+    WASM --- HOST
+    WASM --- REG
+    HUB <-->|"WebSocket RPC: screenshots,<br/>widgets, clicks, values"| HOST
+    HL -->|"hosts agent preview"| HOST
+    UI -->|"iframe: visible preview"| HOST
+    ST --> HUB
+    EXP -->|"reads"| SRC
+    EXP -->|"embeds"| ASSETS
+    EXP --> OUT
+```
+
+1. **Edit**: you (in the Studio editor or the Colors panel) or an agent (through MCP tools)
+   change the C++ in your project. The project's sources are always the source of truth.
+2. **Build**: `builder.js` compiles only the changed files with Emscripten into a WebAssembly
+   module that contains your UI, Dear ImGui and the Studio host.
+3. **Preview**: the module runs in the visible preview (an iframe in the Studio UI) and in a
+   headless Chromium for agents. `studio_host_web.cpp` renders through WebGL2 and can step
+   frames deterministically, inject input and read pixels back.
+4. **Inspect and interact**: `studio_runtime.cpp` records every widget through Dear ImGui's
+   test-engine hooks. Over WebSocket RPC (`runtime-hub.js`) the server lists widgets, clicks,
+   drags, sets values, captures screenshots and animation filmstrips, and compares them with
+   reference images.
+5. **Iterate**: every build is snapshotted in the history (screenshot, diff, notes), so any
+   iteration can be compared or reverted.
+6. **Export**: `exporter.js` writes a standalone CMake + GLFW + OpenGL 3 app, plus `embed/`,
+   flat drop-in sources with assets compiled in, for adding the menu to your own project.
+
+Every capability is a single operation in `server/ops.js`. The Studio UI, the HTTP API,
+the MCP tools and the CLI all call the same operations.
 
 ## Architecture
 
@@ -264,6 +373,8 @@ server/
   compare.js images.js   metrics, compositing, PNG/JPEG
   history.js textdiff.js snapshots, diff, revert
   exporter.js zip.js     native export + check
+  colors.js              Colors panel: colour literal scan + in-place rewrite
+  embed.js               drop-in embed/ sources (flat, assets compiled in)
   agent.js scaffold.js   Claude Code design agent, project templates + agent kit
 runtime/
   include/studio.h       instrumentation macros (no-ops natively)
@@ -277,6 +388,7 @@ agent/designer.md        the designer agent's instructions
 scripts/setup.js         npm run setup (Emscripten, browser, first builds)
 templates/               showcase ("Nova" custom settings UI) and minimal projects
 examples/resonance/      the menu the design agent built
+examples/horizon/        game settings menu example (theme + widgets layer)
 third_party/imgui/       Dear ImGui v1.92.9b (see STUDIO_PATCHES.md)
 ```
 
@@ -288,8 +400,14 @@ npm test    # unit + agent wiring + end-to-end (real Emscripten builds in headle
 
 End-to-end tests skip automatically when emcc or Chromium is unavailable.
 
+## Author
+
+ImGui Studio was created by **[OPTIC7409](https://github.com/OPTIC7409)**. If you use it
+or build on it, please keep the copyright notice in [LICENSE](LICENSE) and credit the
+project.
+
 ## Licences
 
-MIT for ImGui Studio. Dear ImGui is MIT (third_party/imgui/LICENSE.txt). The Inter
+MIT for ImGui Studio (Copyright (c) 2026 OPTIC7409). Dear ImGui is MIT (third_party/imgui/LICENSE.txt). The Inter
 font bundled with the templates is under the SIL Open Font License
 (templates/showcase/assets/fonts/Inter-LICENSE.txt).

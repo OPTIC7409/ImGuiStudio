@@ -5,3 +5,4 @@ workspace/
 **/export/
 *.o
 .DS_Store
+my-menu/

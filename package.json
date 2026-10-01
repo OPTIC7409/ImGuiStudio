@@ -1,5 +1,7 @@
 {
   "name": "imgui-studio",
+  "author": "OPTIC7409 (https://github.com/OPTIC7409)",
+  "repository": { "type": "git", "url": "git+https://github.com/OPTIC7409/ImGuiStudio.git" },
   "version": "0.1.0",
   "description": "A local-first visual feedback loop for AI agents authoring real Dear ImGui interfaces in C++ (Emscripten + WebGL2).",
   "type": "module",
@@ -11,6 +13,7 @@
     "setup": "node scripts/setup.js",
     "start": "node bin/imgui-studio.js serve --open",
     "resonance": "node bin/imgui-studio.js serve --project examples/resonance --port 7421 --open",
+    "horizon": "node bin/imgui-studio.js serve --project examples/horizon --port 7423 --open",
     "doctor": "node bin/imgui-studio.js doctor",
     "mcp": "node bin/imgui-studio.js mcp",
     "build": "node bin/imgui-studio.js build",
