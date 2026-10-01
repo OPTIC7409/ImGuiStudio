@@ -7,6 +7,7 @@ import { initEditor } from './editor.js';
 import { initPreview } from './preview-panel.js';
 import { initInspector } from './inspector.js';
 import { initReference } from './reference.js';
+import { initColors } from './colors.js';
 import { initHistory } from './history.js';
 import { initCaptures } from './captures.js';
 import { initActivity } from './activity.js';
@@ -147,6 +148,7 @@ async function main() {
   app.preview = initPreview(app);
   initInspector(app);
   initCompare(app);
+  initColors(app);
   initReference(app);
   initHistory(app);
   initCaptures(app);

@@ -12,6 +12,7 @@ import { compose, crop, decodeImage, downscale, encodePng, scaleNearest } from '
 import { compareImages, describeComparison } from './compare.js';
 import { exportProject, nativeCheck } from './exporter.js';
 import { unifiedDiff } from './textdiff.js';
+import { scanProject, setColors } from './colors.js';
 
 const MAX_READ = 2 * 1024 * 1024;
 
@@ -1037,6 +1038,32 @@ op('export_check', {
 // ---------------------------------------------------------------------------
 // Studio UI-only operations (not exposed as MCP tools)
 // ---------------------------------------------------------------------------
+
+op('colors_list', {
+  mcp: false,
+  title: 'Colors',
+  description: 'Colour literals in the project sources (Hex(0x..), ImVec4, ImColor, IM_COL32), named by what they are assigned to, plus unique colours with their uses.',
+  input: S.obj({}),
+  async handler(_a, { studio }) {
+    return scanProject(studio.projectDir);
+  },
+});
+
+op('colors_set', {
+  mcp: false,
+  title: 'Set colour',
+  description: 'Rewrite colour literals in place (same notation) to a new RGBA. Each edit names a literal from colors_list by id and the literal text it had.',
+  input: S.obj(
+    {
+      edits: { type: 'array', minItems: 1, items: S.obj({ id: S.str('file:offset from colors_list'), literal: S.str('Literal text as listed') }, ['id', 'literal']) },
+      rgba: { type: 'array', items: { type: 'number' }, minItems: 4, maxItems: 4, description: '[r, g, b, a] in 0..1' },
+    },
+    ['edits', 'rgba'],
+  ),
+  async handler({ edits, rgba }, { studio }) {
+    return setColors(studio.projectDir, { edits, rgba });
+  },
+});
 
 op('studio_settings', {
   mcp: false,
